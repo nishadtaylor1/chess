@@ -287,7 +287,7 @@
     #openingStatus { font-size:11px; color:#a5b4fc; padding:3px 2px; min-height:16px; }
 
     /* auto-detected opening bar */
-    #autoOpeningBar { font-size:12px; color:#a5b4fc; min-height:17px; padding:2px 0 1px; }
+    #autoOpeningBar { font-size:12px; color:#a5b4fc; padding:2px 0 1px; }
 
     /* analysis opening info panel */
     .opening-info-panel {
@@ -913,24 +913,23 @@ const ECO_BOOK = [
 // Built from ECO_BOOK at startup; deepest-match (most moves) wins for each FEN.
 const FEN_MAP = new Map();
 (function buildFenMap() {
-  const tmp = new Chess();
-  for (const entry of ECO_BOOK) {
-    tmp.reset();
+  ECO_BOOK.forEach((entry, entryIdx) => {
+    const tmp = new Chess();
     for (let i = 0; i < entry.moves.length; i++) {
       if (!tmp.move(entry.moves[i])) break;
       const key = tmp.fen().split(' ').slice(0, 4).join(' ');
       const existing = FEN_MAP.get(key);
-      if (!existing || i + 1 >= existing.depth) {
+      if (!existing || i + 1 > existing.depth) {
         FEN_MAP.set(key, {
           eco:  entry.eco,
           name: entry.name,
           description: entry.description || '',
           depth: i + 1,
-          idx:  ECO_BOOK.indexOf(entry),
+          idx:  entryIdx,
         });
       }
     }
-  }
+  });
 })();
 
 // ── Stockfish workers ──────────────────────────────────────────────────────
@@ -1563,7 +1562,8 @@ function doMove(from, to, promotion = 'q') {
   selected = null; legalMoves = null;
   // Lock mode + difficulty the moment the first move is played
   if (game.history().length === 1 && currentMode === 'vs-computer') lockSettings();
-  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus(); updateAutoOpening();
+  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
+  try { updateAutoOpening(); } catch(e) { console.error('updateAutoOpening:', e); }
   scheduleEval(game.fen(), game.turn());
 
   if (currentMode === 'multiplayer') {
