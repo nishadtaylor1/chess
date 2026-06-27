@@ -12,6 +12,16 @@ const httpServer = createServer(app);
 const io         = new Server(httpServer);
 const PORT       = process.env.PORT || 3000;
 
+// Auto-migrate: add elo column if the table predates this feature
+db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS elo INTEGER NOT NULL DEFAULT 1200`)
+  .catch(err => console.error('DB migrate (elo):', err));
+
+function calcEloChange(playerElo, opponentElo, score) {
+  const K = playerElo < 1200 ? 32 : playerElo < 1800 ? 24 : 16;
+  const expected = 1 / (1 + Math.pow(10, (opponentElo - playerElo) / 400));
+  return Math.round(K * (score - expected));
+}
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
@@ -58,15 +68,35 @@ function broadcastLobby() {
 async function saveMultiplayerGame(room, result) {
   try {
     const pgn = room.chess.pgn();
-    const rows = [
-      [room.white.userId, pgn, result],
-      [room.black.userId, pgn, result === '1-0' ? '0-1' : result === '0-1' ? '1-0' : result],
+    const wScore = result === '1-0' ? 1 : result === '1/2-1/2' ? 0.5 : 0;
+    const bScore = 1 - wScore;
+
+    const [wRow, bRow] = await Promise.all([
+      db.query('SELECT elo FROM users WHERE id=$1', [room.white.userId]),
+      db.query('SELECT elo FROM users WHERE id=$1', [room.black.userId]),
+    ]);
+    const wElo = wRow.rows[0]?.elo ?? 1200;
+    const bElo = bRow.rows[0]?.elo ?? 1200;
+
+    const wChange  = calcEloChange(wElo, bElo, wScore);
+    const bChange  = calcEloChange(bElo, wElo, bScore);
+    const newWElo  = Math.max(100, wElo + wChange);
+    const newBElo  = Math.max(100, bElo + bChange);
+
+    const entries = [
+      { uid: room.white.userId, r: result==='1-0'?'win':result==='0-1'?'loss':'draw', newElo: newWElo, sid: room.white.socketId, change: wChange },
+      { uid: room.black.userId, r: result==='0-1'?'win':result==='1-0'?'loss':'draw', newElo: newBElo, sid: room.black?.socketId,  change: bChange },
     ];
-    for (const [uid, p, r] of rows) {
+    for (const { uid, r, newElo } of entries) {
       await db.query(
-        `INSERT INTO games (user_id, pgn, result, difficulty, ended_at) VALUES ($1,$2,$3,'multiplayer',NOW())`,
-        [uid, p, r]
+        `INSERT INTO games (user_id, pgn, result, difficulty, white_elo, black_elo, ended_at) VALUES ($1,$2,$3,'multiplayer',$4,$5,NOW())`,
+        [uid, pgn, r, wElo, bElo]
       );
+      await db.query('UPDATE users SET elo=$1 WHERE id=$2', [newElo, uid]);
+    }
+    // Notify each player of their new ELO
+    for (const { sid, newElo, change } of entries) {
+      if (sid) io.to(sid).emit('player:elo_update', { newElo, change });
     }
   } catch (e) { console.error('save multiplayer game:', e); }
 }

@@ -32,6 +32,17 @@
         <input type="password" id="password" name="password" autocomplete="new-password"
                placeholder="At least 8 characters" required>
       </div>
+      <div class="form-group">
+        <label for="skill_level">Your skill level</label>
+        <select id="skill_level" name="skill_level" style="width:100%;padding:10px 14px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:14px;cursor:pointer;outline:none;">
+          <option value="beginner">Beginner — just learning the rules (600)</option>
+          <option value="casual">Casual — know the basics, play for fun (900)</option>
+          <option value="intermediate" selected>Intermediate — regular player, know some tactics (1200)</option>
+          <option value="advanced">Advanced — competitive, study openings (1500)</option>
+          <option value="expert">Expert — tournament-level player (1800)</option>
+        </select>
+        <p style="font-size:11px;color:#475569;margin-top:5px;">Don't worry — your ELO adjusts automatically after each game.</p>
+      </div>
       <button type="submit" class="btn" id="submitBtn">Create Account</button>
     </form>
 
@@ -53,9 +64,10 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: document.getElementById('username').value,
-          email:    document.getElementById('email').value,
-          password: document.getElementById('password').value,
+          username:    document.getElementById('username').value,
+          email:       document.getElementById('email').value,
+          password:    document.getElementById('password').value,
+          skill_level: document.getElementById('skill_level').value,
         }),
       });
 

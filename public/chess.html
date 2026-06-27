@@ -299,6 +299,7 @@
   <div class="brand"><a href="/chess">♟ <span>Chess</span></a></div>
   <div class="user">
     Signed in as <strong id="navUser">…</strong>
+    <span id="navEloWrap" style="font-size:11px;color:#64748b;">•&nbsp;ELO&nbsp;<strong id="navElo" style="color:#6366f1;font-size:13px;">…</strong></span>
     <a href="/lobby" style="font-size:12px;color:#94a3b8;text-decoration:none;border:1px solid #475569;padding:5px 12px;border-radius:5px;">Play a Friend</a>
     <form action="/logout" method="POST" style="margin:0"><button type="submit">Sign out</button></form>
   </div>
@@ -730,6 +731,9 @@ let mpDrawOffered = false;
 let selectedOpening  = null;
 let openingPositions = [];  // FEN after each half-move (index 0 = start position)
 
+// player ELO (fetched on boot, updated after games)
+let playerElo = 1200;
+
 // board annotations (right-click arrows & square highlights)
 let annotations       = [];   // [{ type:'arrow'|'circle', from?, to?, sq?, color }]
 let annotatingFrom    = null; // square where right-mousedown started
@@ -819,7 +823,7 @@ function clockStop() {
 function onFlag(color) {
   document.getElementById('status').textContent =
     color === 'w' ? '⏱ Time! Black wins on flag!' : '⏱ Time! White wins on flag!';
-  saveGame('vs-computer', getStep(parseInt(eloSlider.value)).elo, null);
+  saveGame('vs-computer', null, getStep(parseInt(eloSlider.value)).elo, color === 'w' ? 'loss' : 'win');
 }
 function fmtMs(ms) {
   if (ms <= 0) return '0:00';
@@ -861,7 +865,7 @@ function setPlayMode(pm) {
   document.getElementById('eloSection').style.display     = pm === 'analysis' ? 'none' : '';
   document.getElementById('openingSection').style.display = pm === 'analysis' ? 'none' : '';
   document.getElementById('tcRow').style.display          = pm === 'challenge' ? '' : 'none';
-  document.getElementById('takeBackBtn').style.display    = pm === 'casual' ? '' : 'none';
+  document.getElementById('takeBackBtn').style.display    = pm !== 'challenge' ? '' : 'none';
   newGame();
 }
 
@@ -1188,7 +1192,7 @@ function doMove(from, to, promotion = 'q') {
   if (currentMode === 'vs-computer' && playMode !== 'analysis') {
     if (game.isGameOver()) {
       clockStop();
-      saveGame('vs-computer', getStep(parseInt(eloSlider.value)).elo, null);
+      saveGame('vs-computer', null, getStep(parseInt(eloSlider.value)).elo);
     } else {
       clockSwitch(game.turn());
       if (game.turn() === 'b') triggerAI();
@@ -1197,16 +1201,21 @@ function doMove(from, to, promotion = 'q') {
   return true;
 }
 
-// ── Take-back (Casual only) ────────────────────────────────────────────────
+// ── Take-back (Casual + Analysis) ─────────────────────────────────────────
 function takeBack() {
-  if (playMode !== 'casual') return;
+  if (playMode !== 'casual' && playMode !== 'analysis') return;
   const h = getHistory();
   if (h.length === 0) return;
-  gameId++; // cancel any pending AI computation
+  gameId++;
   setThinking(false);
-  // Undo AI move then player move (or just player move if AI hasn't moved yet)
-  if (game.turn() === 'w' && h.length >= 2) { game.undo(); game.undo(); }
-  else if (game.turn() === 'b')              { game.undo(); }
+  if (playMode === 'casual') {
+    // Undo both AI move and player move so player can replay their turn
+    if (game.turn() === 'w' && h.length >= 2) { game.undo(); game.undo(); }
+    else if (game.turn() === 'b')              { game.undo(); }
+  } else {
+    // Analysis: undo the last half-move
+    game.undo();
+  }
   clockStop();
   viewIdx = game.history().length;
   selected = null; legalMoves = null;
@@ -1519,19 +1528,28 @@ function newGame() {
   renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
 }
 
-async function saveGame(mode, wElo, bElo) {
-  const result = game.isCheckmate()
+function applyEloUpdate(eloChange, newElo) {
+  if (newElo == null || eloChange == null) return;
+  playerElo = newElo;
+  document.getElementById('navElo').textContent = newElo;
+  const sign = eloChange >= 0 ? '+' : '';
+  showToast(`${sign}${eloChange} ELO  (now ${newElo})`, 4000);
+}
+
+async function saveGame(mode, wElo, bElo, resultOverride = null) {
+  const result = resultOverride || (game.isCheckmate()
     ? (game.turn() === 'w' ? 'loss' : 'win')
-    : 'draw';
+    : 'draw');
   try {
-    await fetch('/api/games', {
+    const data = await fetch('/api/games', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         pgn: game.pgn(), result, mode,
         white_elo: wElo === 'Max' ? 9999 : (Number(wElo)||null),
         black_elo: bElo === 'Max' ? 9999 : (Number(bElo)||null),
       }),
-    });
+    }).then(r => r.json());
+    if (mode === 'vs-computer') applyEloUpdate(data.eloChange, data.newElo);
   } catch(_) {}
   loadHistory();
 }
@@ -1542,16 +1560,8 @@ document.getElementById('resignBtn').addEventListener('click', async () => {
   if (game.isGameOver()) { newGame(); return; }
   clockStop();
   const step = getStep(parseInt(eloSlider.value));
-  await fetch('/api/games', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      pgn: game.pgn(), result:'resign', mode:'vs-computer',
-      white_elo: null,
-      black_elo: step.elo === 'Max' ? 9999 : step.elo,
-    }),
-  });
+  await saveGame('vs-computer', null, step.elo, 'resign');
   document.getElementById('status').textContent = '🏳 Resigned';
-  loadHistory();
   setTimeout(newGame, 1500);
 });
 
@@ -1700,6 +1710,8 @@ function initMultiplayer(roomId) {
     showToast('Illegal move.', 1800);
   });
 
+  mpSocket.on('player:elo_update', ({ newElo, change }) => applyEloUpdate(change, newElo));
+
   mpSocket.on('game:end', ({ result, reason }) => {
     clockStop();
     document.getElementById('mpDrawBtn').style.display   = 'none';
@@ -1783,6 +1795,8 @@ document.getElementById('openingSelect').addEventListener('change', function() {
   initEvalWorker();
   const me = await fetch('/api/me').then(r => r.json());
   document.getElementById('navUser').textContent = me.username;
+  playerElo = me.elo ?? 1200;
+  document.getElementById('navElo').textContent = playerElo;
   syncEloDisplay(eloSlider,  document.getElementById('eloNum'),
     document.getElementById('eloLabel'), document.getElementById('eloSub'));
   syncEloDisplay(wEloSlider, document.getElementById('wEloNum'), null, null);
