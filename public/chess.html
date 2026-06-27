@@ -180,6 +180,9 @@
     .elo-label { font-size:12px; color:#94a3b8; text-align:right; }
     .elo-sub   { font-size:10px; color:#475569; }
     input[type=range] { width:100%; accent-color:#6366f1; cursor:pointer; height:4px; margin-bottom:8px; }
+    input[type=range]:disabled { opacity:.35; cursor:not-allowed; }
+    .play-pill.locked { opacity:.45; cursor:not-allowed; }
+    #settingsLockNote { font-size:10px; color:#475569; text-align:center; padding:2px 0 6px; display:none; }
     .elo-ticks {
       display:flex; justify-content:space-between;
       font-size:9px; color:#475569; margin-bottom:10px; padding:0 2px;
@@ -359,6 +362,7 @@
         <button class="play-pill"        id="pillChallenge" onclick="setPlayMode('challenge')">Challenge</button>
         <button class="play-pill"        id="pillAnalysis"  onclick="setPlayMode('analysis')">Analysis</button>
       </div>
+      <div id="settingsLockNote">🔒 Mode &amp; difficulty locked mid-game</div>
 
       <div class="psec">
         <div class="status-box" id="status">Loading…</div>
@@ -409,6 +413,9 @@
       </div>
 
       <button class="btn" id="newGameBtn">New Game</button>
+      <div class="btn-row" id="hintRow" style="display:none">
+        <button class="btn sec" id="hintBtn" onclick="requestHint()">💡 Hint</button>
+      </div>
       <div class="btn-row">
         <button class="btn warn" id="takeBackBtn" style="display:none" onclick="takeBack()">↩ Take Back</button>
         <button class="btn sec" id="resignBtn">Resign</button>
@@ -734,6 +741,11 @@ let openingPositions = [];  // FEN after each half-move (index 0 = start positio
 // player ELO (fetched on boot, updated after games)
 let playerElo = 1200;
 
+// hint
+const HINT_STEP = { le:null, skill:20, depth:15, mt:null, rc:0 }; // always full strength
+let hintArrow   = null;  // { from, to } — the Stockfish-suggested move
+let hintLoading = false;
+
 // board annotations (right-click arrows & square highlights)
 let annotations       = [];   // [{ type:'arrow'|'circle', from?, to?, sq?, color }]
 let annotatingFrom    = null; // square where right-mousedown started
@@ -766,9 +778,10 @@ window.goForward   = goForward;
 window.goToEnd     = goToEnd;
 window.goToMove    = goToMove;
 window.goToLobby   = goToLobby;
-window.mpOfferDraw = mpOfferDraw;
-window.mpResign    = mpResign;
-window.setOpening  = setOpening;
+window.mpOfferDraw  = mpOfferDraw;
+window.mpResign     = mpResign;
+window.setOpening   = setOpening;
+window.requestHint  = requestHint;
 
 // ── ELO sliders ───────────────────────────────────────────────────────────
 function syncEloDisplay(slider, numEl, labelEl, subEl) {
@@ -780,9 +793,11 @@ function syncEloDisplay(slider, numEl, labelEl, subEl) {
 const eloSlider  = document.getElementById('eloSlider');
 const wEloSlider = document.getElementById('wEloSlider');
 const bEloSlider = document.getElementById('bEloSlider');
-eloSlider.addEventListener('input', () =>
+eloSlider.addEventListener('input', () => {
+  if (game.history().length > 0 && !game.isGameOver()) return;
   syncEloDisplay(eloSlider, document.getElementById('eloNum'),
-    document.getElementById('eloLabel'), document.getElementById('eloSub')));
+    document.getElementById('eloLabel'), document.getElementById('eloSub'));
+});
 wEloSlider.addEventListener('input', () =>
   syncEloDisplay(wEloSlider, document.getElementById('wEloNum'), null, null));
 bEloSlider.addEventListener('input', () =>
@@ -859,6 +874,11 @@ function setMode(mode) {
   newGame();
 }
 function setPlayMode(pm) {
+  // Block changes once a game is in progress
+  if (game.history().length > 0 && !game.isGameOver()) {
+    showToast('Finish or resign your game to change modes.', 2500);
+    return;
+  }
   playMode = pm;
   ['casual','challenge','analysis'].forEach(p =>
     document.getElementById('pill' + p[0].toUpperCase() + p.slice(1)).classList.toggle('active', p === pm));
@@ -866,6 +886,7 @@ function setPlayMode(pm) {
   document.getElementById('openingSection').style.display = pm === 'analysis' ? 'none' : '';
   document.getElementById('tcRow').style.display          = pm === 'challenge' ? '' : 'none';
   document.getElementById('takeBackBtn').style.display    = pm !== 'challenge' ? '' : 'none';
+  document.getElementById('hintRow').style.display        = pm !== 'challenge' ? '' : 'none';
   newGame();
 }
 
@@ -1011,6 +1032,7 @@ function setThinking(on, cc = false) {
 
 // ── Position navigation ────────────────────────────────────────────────────
 function goToMove(idx) {
+  hintArrow = null;
   viewIdx = Math.max(0, Math.min(idx, getHistory().length));
   selected = null; legalMoves = null;
   renderBoard(); updateMoveList();
@@ -1179,8 +1201,11 @@ function doMove(from, to, promotion = 'q') {
   const move   = game.move({ from, to, promotion: isPromo ? promotion : undefined });
   if (!move) return false;
 
+  hintArrow = null;
   viewIdx = game.history().length; // stay at live position after any move
   selected = null; legalMoves = null;
+  // Lock mode + difficulty the moment the first move is played
+  if (game.history().length === 1 && currentMode === 'vs-computer') lockSettings();
   renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
   scheduleEval(game.fen(), game.turn());
 
@@ -1199,6 +1224,38 @@ function doMove(from, to, promotion = 'q') {
     }
   }
   return true;
+}
+
+// ── Settings lock (ELO + mode pills frozen once game starts) ──────────────
+function lockSettings() {
+  eloSlider.disabled = true;
+  document.querySelectorAll('.play-pill').forEach(p => p.classList.add('locked'));
+  document.getElementById('settingsLockNote').style.display = '';
+}
+function unlockSettings() {
+  eloSlider.disabled = false;
+  document.querySelectorAll('.play-pill').forEach(p => p.classList.remove('locked'));
+  document.getElementById('settingsLockNote').style.display = 'none';
+}
+
+// ── Hint (Casual + Analysis) ───────────────────────────────────────────────
+async function requestHint() {
+  if (hintLoading || aiThinking || !sfW) return;
+  const vg = getViewGame();
+  if (vg.isGameOver()) return;
+
+  hintLoading = true;
+  const btn = document.getElementById('hintBtn');
+  btn.disabled = true; btn.textContent = 'Thinking…';
+
+  const best = await sfMove(sfW, vg.fen(), HINT_STEP);
+
+  hintLoading = false;
+  btn.disabled = false; btn.textContent = '💡 Hint';
+  if (!best) return;
+
+  hintArrow = { from: best.slice(0, 2), to: best.slice(2, 4) };
+  renderAnnotationLayer();
 }
 
 // ── Take-back (Casual + Analysis) ─────────────────────────────────────────
@@ -1379,6 +1436,9 @@ function renderAnnotationLayer() {
     html += p.type === 'arrow' ? mkArrow(p.from, p.to, p.color, 0.5) : mkCircle(p.sq, p.color, 0.5);
   }
 
+  // Stockfish hint arrow (cyan, drawn on top)
+  if (hintArrow) html += mkArrow(hintArrow.from, hintArrow.to, 'rgba(96,196,255,0.92)');
+
   if (!html) return;
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.id = 'annotSvg';
@@ -1517,6 +1577,8 @@ function newGame() {
   viewIdx = 0; selected = null; legalMoves = null;
   if (dragState) { dragState.ghost.remove(); dragState = null; }
   annotations = []; annotatingFrom = null; previewAnnotation = null;
+  hintArrow = null; hintLoading = false;
+  unlockSettings();
   setThinking(false);
   clockInit();
   if (currentMode === 'vs-computer') {
@@ -1802,6 +1864,10 @@ document.getElementById('openingSelect').addEventListener('change', function() {
   syncEloDisplay(wEloSlider, document.getElementById('wEloNum'), null, null);
   syncEloDisplay(bEloSlider, document.getElementById('bEloNum'), null, null);
   await loadHistory();
+
+  // Show hint + take-back rows based on initial play mode (casual)
+  document.getElementById('hintRow').style.display     = '';
+  document.getElementById('takeBackBtn').style.display = '';
 
   const roomId = new URLSearchParams(location.search).get('room');
   if (roomId) {
