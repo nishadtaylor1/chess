@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f172a; color: #e2e8f0; min-height: 100vh; user-select: none;
+    }
+    nav {
+      background: #1e293b; border-bottom: 1px solid #334155;
+      padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+    }
+    nav .brand { font-size: 18px; font-weight: 700; }
+    nav .brand span { color: #6366f1; }
+    nav .user { font-size: 13px; color: #94a3b8; display: flex; align-items: center; gap: 16px; }
+    nav .user strong { color: #e2e8f0; }
+    nav button {
+      background: none; border: 1px solid #475569; color: #94a3b8;
+      padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    }
+    nav button:hover { border-color: #6366f1; color: #6366f1; }
+
+    .layout {
+      display: flex; gap: 24px; padding: 20px;
+      max-width: 1160px; margin: 0 auto; align-items: flex-start;
+    }
+
+    /* ── board column ── */
+    .board-col { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
+
+    .player-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 7px 14px;
+    }
+    .player-bar.active-clock { border-color: #4ade80; background: #0f2a1a; }
+    .player-name { font-size: 13px; font-weight: 600; color: #94a3b8; }
+    .player-bar.active-clock .player-name { color: #e2e8f0; }
+    .player-clock { font-size: 22px; font-weight: 700; font-family: monospace; color: #475569; }
+    .player-bar.active-clock .player-clock { color: #f0d9b5; }
+    .player-clock.low-time { color: #ef4444 !important; animation: pulse .8s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+    .board-outer { flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; }
+    .board-row { display: flex; align-items: center; gap: 4px; }
+    .rank-col {
+      display: flex; flex-direction: column; justify-content: space-around;
+      width: 18px; font-size: 11px; color: #64748b; font-weight: 600; text-align: center;
+    }
+    #board {
+      display: grid; grid-template-columns: repeat(8, 1fr);
+      width: min(504px, calc(100vw - 340px));
+      height: min(504px, calc(100vw - 340px));
+      border: 3px solid #0f172a; border-radius: 3px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.6), 0 0 0 1px #334155;
+      overflow: hidden;
+    }
+    .file-labels {
+      display: grid; grid-template-columns: repeat(8, 1fr);
+      width: min(504px, calc(100vw - 340px)); margin-left: 42px;
+    }
+    .file-label { text-align: center; font-size: 11px; color: #64748b; font-weight: 600; }
+
+    /* viewing-past banner */
+    .view-banner {
+      display: none; background: #1e3a5f; border: 1px solid #2563eb;
+      border-radius: 6px; padding: 5px 12px; font-size: 12px; color: #93c5fd;
+      text-align: center;
+    }
+    .view-banner.visible { display: block; }
+    .view-banner button {
+      background: #2563eb; border: none; color: white; padding: 2px 8px;
+      border-radius: 4px; font-size: 11px; cursor: pointer; margin-left: 8px;
+    }
+
+    /* ── eval bar ── */
+    .eval-col { flex-shrink: 0; width: 16px; display: flex; align-items: stretch; }
+    .eval-bar {
+      width: 14px; flex: 1;
+      background: #f0d9b5;
+      border: 1px solid #475569; border-radius: 3px;
+      overflow: hidden; position: relative;
+    }
+    .eval-fill {
+      width: 100%; height: 50%;
+      background: #1a1a1a;
+      transition: height 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .eval-lbl {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      writing-mode: vertical-rl;
+      font-size: 8px; font-weight: 900; font-family: monospace;
+      pointer-events: none; z-index: 2; line-height: 1; letter-spacing: -0.5px;
+    }
+    .eval-lbl.wup { bottom: 3px; color: #1a1a1a; }
+    .eval-lbl.bup { top: 3px;    color: #f0d9b5; }
+    .eval-lbl.even {
+      top: 50%; transform: translateX(-50%) translateY(-50%);
+      color: #64748b; writing-mode: horizontal-tb; font-size: 7px;
+    }
+
+    /* squares */
+    .sq { position: relative; cursor: pointer; aspect-ratio: 1; }
+    .sq.light { background: #f0d9b5; }
+    .sq.dark  { background: #b58863; }
+    .sq.last-from.light, .sq.last-to.light { background: #cdd16f; }
+    .sq.last-from.dark,  .sq.last-to.dark  { background: #aaa23a; }
+    .sq.selected::after {
+      content:''; position:absolute; inset:0; background:rgba(20,85,30,.45); z-index:1;
+    }
+    .sq.legal-empty::after {
+      content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:30%; height:30%; background:rgba(20,85,30,.42); border-radius:50%; z-index:1;
+    }
+    .sq.legal-capture::after {
+      content:''; position:absolute; inset:0;
+      box-shadow:inset 0 0 0 4px rgba(20,85,30,.5); border-radius:50%; z-index:1;
+    }
+    .sq img {
+      position:absolute; inset:0; width:100%; height:100%; padding:4%;
+      pointer-events:none; filter:drop-shadow(1px 2px 2px rgba(0,0,0,.35));
+    }
+    .sq.drag-src img { opacity:.25; }
+
+    .drag-ghost {
+      position:fixed; pointer-events:none; z-index:9999; width:70px; height:70px;
+      transform:translate(-50%,-50%);
+      filter:drop-shadow(3px 5px 6px rgba(0,0,0,.55));
+    }
+
+    /* ── panel ── */
+    .panel { flex:1; min-width:240px; max-width:275px; }
+    .psec { margin-bottom:13px; }
+    .plbl {
+      font-size:10px; font-weight:700; text-transform:uppercase;
+      letter-spacing:.07em; color:#475569; margin-bottom:7px;
+    }
+
+    /* mode tabs */
+    .mode-tabs { display:flex; border:1px solid #334155; border-radius:7px; overflow:hidden; margin-bottom:13px; }
+    .mode-tab {
+      flex:1; padding:8px 4px; text-align:center; font-size:12px; font-weight:600;
+      cursor:pointer; color:#64748b; background:transparent; border:none;
+      transition:background .15s, color .15s;
+    }
+    .mode-tab.active { background:#6366f1; color:white; }
+
+    /* play-mode pills */
+    .play-pills { display:flex; gap:5px; margin-bottom:12px; }
+    .play-pill {
+      flex:1; padding:6px 4px; text-align:center; font-size:11px; font-weight:600;
+      background:#1e293b; border:1px solid #334155; border-radius:6px;
+      cursor:pointer; color:#64748b; transition:all .15s;
+    }
+    .play-pill.active { border-color:#6366f1; background:rgba(99,102,241,.15); color:#a5b4fc; }
+
+    /* status */
+    .status-box {
+      background:#1e293b; border:1px solid #334155; border-radius:8px;
+      padding:9px 13px; font-size:13px; font-weight:600;
+      min-height:40px; display:flex; align-items:center; margin-bottom:5px;
+    }
+    .thinking-bar { height:3px; background:#1e293b; border-radius:2px; margin-bottom:12px; overflow:hidden; }
+    .thinking-bar .fill { height:100%; width:0; background:linear-gradient(90deg,#6366f1,#a855f7); border-radius:2px; }
+    .thinking-bar.active .fill { animation:scan 1.3s ease-in-out infinite; }
+    @keyframes scan { 0%{width:0;margin-left:0} 50%{width:60%;margin-left:20%} 100%{width:0;margin-left:100%} }
+
+    /* ELO */
+    .elo-display {
+      background:#1e293b; border:1px solid #334155; border-radius:8px;
+      padding:9px 13px; margin-bottom:8px;
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    .elo-num { font-size:22px; font-weight:700; color:#6366f1; }
+    .elo-label { font-size:12px; color:#94a3b8; text-align:right; }
+    .elo-sub   { font-size:10px; color:#475569; }
+    input[type=range] { width:100%; accent-color:#6366f1; cursor:pointer; height:4px; margin-bottom:8px; }
+    .elo-ticks {
+      display:flex; justify-content:space-between;
+      font-size:9px; color:#475569; margin-bottom:10px; padding:0 2px;
+    }
+    .tc-select {
+      width:100%; background:#1e293b; border:1px solid #334155; border-radius:7px;
+      color:#e2e8f0; padding:7px 10px; font-size:12px; cursor:pointer;
+      margin-bottom:10px; outline:none;
+    }
+    .tc-select:focus { border-color:#6366f1; }
+
+    /* CPU vs CPU sliders */
+    .two-elo { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-bottom:9px; }
+    .side-elo { background:#1e293b; border:1px solid #334155; border-radius:7px; padding:7px 9px; }
+    .side-lbl { font-size:10px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:3px; }
+    .side-num { font-size:17px; font-weight:700; color:#6366f1; margin-bottom:4px; }
+    .side-elo input { margin-bottom:0; }
+    .speed-btns { display:flex; gap:5px; margin-bottom:9px; }
+    .speed-btn {
+      flex:1; padding:5px 3px; background:#1e293b; border:1px solid #334155;
+      border-radius:5px; color:#64748b; font-size:10px; cursor:pointer;
+    }
+    .speed-btn.active { border-color:#6366f1; color:#6366f1; background:rgba(99,102,241,.1); }
+
+    /* buttons */
+    .btn {
+      display:block; width:100%; padding:8px; background:#6366f1; color:white;
+      border:none; border-radius:7px; font-size:13px; font-weight:600;
+      cursor:pointer; margin-bottom:7px; transition:background .15s; text-align:center;
+    }
+    .btn:hover { background:#4f46e5; }
+    .btn.sec { background:transparent; border:1px solid #334155; color:#94a3b8; }
+    .btn.sec:hover { border-color:#6366f1; color:#6366f1; }
+    .btn.warn { background:transparent; border:1px solid #854d0e; color:#fbbf24; }
+    .btn.warn:hover { background:rgba(251,191,36,.08); }
+    .btn.dng { background:transparent; border:1px solid #7f1d1d; color:#f87171; }
+    .btn.dng:hover { background:rgba(239,68,68,.1); }
+    .btn-row { display:flex; gap:6px; margin-bottom:7px; }
+    .btn-row .btn { margin-bottom:0; }
+
+    /* move list */
+    .move-list { background:#1e293b; border:1px solid #334155; border-radius:8px; overflow:hidden; }
+    .ml-head {
+      padding:5px 11px; font-size:10px; font-weight:700; text-transform:uppercase;
+      letter-spacing:.06em; color:#475569; border-bottom:1px solid #334155;
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    .copy-btn {
+      background:transparent; border:1px solid #334155; color:#475569;
+      padding:2px 8px; border-radius:4px; font-size:10px; cursor:pointer;
+    }
+    .copy-btn:hover { border-color:#6366f1; color:#6366f1; }
+    .ml-body { max-height:140px; overflow-y:auto; padding:3px 0; }
+    .mv-pair { display:grid; grid-template-columns:24px 1fr 1fr; }
+    .mv-pair:nth-child(odd) { background:rgba(255,255,255,.02); }
+    .mv-num { padding:2px 8px; color:#475569; font-size:10px; }
+    .mv-san {
+      padding:3px 6px; font-family:monospace; font-size:12px; color:#94a3b8;
+      cursor:pointer; border-radius:3px; transition:background .1s;
+    }
+    .mv-san:hover { background:rgba(255,255,255,.07); color:#e2e8f0; }
+    .mv-san.current { background:#6366f1; color:white; }
+    .mv-san.viewed { background:rgba(99,102,241,.2); color:#a5b4fc; }
+
+    /* nav bar */
+    .nav-bar { display:flex; gap:4px; padding:6px 8px; border-top:1px solid #334155; }
+    .nav-btn {
+      flex:1; background:#0f172a; border:1px solid #334155; color:#64748b;
+      border-radius:5px; padding:5px 4px; font-size:13px; cursor:pointer;
+      transition:all .1s; text-align:center;
+    }
+    .nav-btn:hover { border-color:#6366f1; color:#6366f1; }
+    .nav-btn:disabled { opacity:.3; cursor:default; border-color:#334155; color:#334155; }
+
+    /* history */
+    .history-list { max-height:140px; overflow-y:auto; }
+    .hist-item {
+      background:#1e293b; border:1px solid #334155; border-radius:6px;
+      padding:5px 9px; margin-bottom:4px; font-size:11px; color:#94a3b8;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .hist-item .res { font-weight:700; color:#6366f1; }
+    .hist-meta { color:#475569; font-size:10px; text-align:right; }
+  </style>
+</head>
+<body>
+<nav>
+  <div class="brand">♟ <span>Chess</span></div>
+  <div class="user">
+    Signed in as <strong id="navUser">…</strong>
+    <form action="/logout" method="POST" style="margin:0"><button type="submit">Sign out</button></form>
+  </div>
+</nav>
+
+<div class="layout">
+  <!-- BOARD -->
+  <div class="board-col">
+    <div class="player-bar" id="barBlack">
+      <span class="player-name" id="barBlackName">⬛ Computer</span>
+      <span class="player-clock" id="clockBlack">∞</span>
+    </div>
+    <div class="board-outer">
+      <div class="board-row">
+        <div class="eval-col">
+          <div class="eval-bar" id="evalBar">
+            <div class="eval-fill" id="evalFill"></div>
+            <span class="eval-lbl even" id="evalLbl">=</span>
+          </div>
+        </div>
+        <div class="rank-col" id="rankCol"></div>
+        <div id="board"></div>
+      </div>
+      <div class="file-labels" id="fileLabels"></div>
+    </div>
+    <div class="player-bar" id="barWhite">
+      <span class="player-name" id="barWhiteName">⬜ You</span>
+      <span class="player-clock" id="clockWhite">∞</span>
+    </div>
+    <div class="view-banner" id="viewBanner">
+      Viewing move <span id="viewPos"></span>
+      <button onclick="goToEnd()">↩ Back to live</button>
+    </div>
+  </div>
+
+  <!-- PANEL -->
+  <div class="panel">
+    <!-- Mode tabs -->
+    <div class="mode-tabs">
+      <button class="mode-tab active" id="tabVC" onclick="setMode('vs-computer')">vs Computer</button>
+      <button class="mode-tab" id="tabCC" onclick="setMode('cpu-vs-cpu')">CPU vs CPU</button>
+    </div>
+
+    <!-- vs Computer -->
+    <div id="vcSection">
+      <!-- Play mode pills -->
+      <div class="play-pills">
+        <button class="play-pill active" id="pillCasual"    onclick="setPlayMode('casual')">Casual</button>
+        <button class="play-pill"        id="pillChallenge" onclick="setPlayMode('challenge')">Challenge</button>
+        <button class="play-pill"        id="pillAnalysis"  onclick="setPlayMode('analysis')">Analysis</button>
+      </div>
+
+      <div class="psec">
+        <div class="status-box" id="status">Loading…</div>
+        <div class="thinking-bar" id="thinkingBar"><div class="fill"></div></div>
+      </div>
+
+      <!-- ELO (hidden in analysis) -->
+      <div id="eloSection" class="psec">
+        <div class="plbl">AI Strength</div>
+        <div class="elo-display">
+          <div class="elo-num" id="eloNum">1500</div>
+          <div>
+            <div class="elo-label" id="eloLabel">Club Player</div>
+            <div class="elo-sub"   id="eloSub">ELO Rating</div>
+          </div>
+        </div>
+        <input type="range" id="eloSlider" min="0" max="24" value="10" step="1">
+        <div class="elo-ticks">
+          <span>500</span><span>800</span><span>1100</span><span>1400</span>
+          <span>1700</span><span>2000</span><span>2300</span><span>2600</span><span>Max</span>
+        </div>
+        <!-- Time control (only Challenge) -->
+        <div id="tcRow" style="display:none">
+          <div class="plbl">Time Control</div>
+          <select id="tcSelect" class="tc-select">
+            <option value="0">∞ Unlimited</option>
+            <option value="1">1+0 Bullet</option>
+            <option value="2">2+1 Bullet</option>
+            <option value="3">3+0 Blitz</option>
+            <option value="4">3+2 Blitz</option>
+            <option value="5" selected>5+0 Blitz</option>
+            <option value="6">5+3 Blitz</option>
+            <option value="7">10+0 Rapid</option>
+            <option value="8">15+10 Rapid</option>
+            <option value="9">30+0 Rapid</option>
+            <option value="10">60+0 Classical</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn" id="newGameBtn">New Game</button>
+      <div class="btn-row">
+        <button class="btn warn" id="takeBackBtn" style="display:none" onclick="takeBack()">↩ Take Back</button>
+        <button class="btn sec" id="resignBtn">Resign</button>
+      </div>
+    </div>
+
+    <!-- CPU vs CPU -->
+    <div id="ccSection" style="display:none">
+      <div class="psec">
+        <div class="plbl">Engine Strengths</div>
+        <div class="two-elo">
+          <div class="side-elo">
+            <div class="side-lbl">⬜ White</div>
+            <div class="side-num" id="wEloNum">1500</div>
+            <input type="range" id="wEloSlider" min="0" max="24" value="10" step="1">
+          </div>
+          <div class="side-elo">
+            <div class="side-lbl">⬛ Black</div>
+            <div class="side-num" id="bEloNum">1500</div>
+            <input type="range" id="bEloSlider" min="0" max="24" value="10" step="1">
+          </div>
+        </div>
+        <div class="plbl">Move Speed</div>
+        <div class="speed-btns">
+          <button class="speed-btn" onclick="setSpeed(2500,this)">Slow</button>
+          <button class="speed-btn active" onclick="setSpeed(900,this)">Normal</button>
+          <button class="speed-btn" onclick="setSpeed(200,this)">Fast</button>
+          <button class="speed-btn" onclick="setSpeed(60,this)">Instant</button>
+        </div>
+      </div>
+      <div class="psec" id="statusCC" style="display:none">
+        <div class="status-box" id="statusCCBox"></div>
+        <div class="thinking-bar" id="thinkingBarCC"><div class="fill"></div></div>
+      </div>
+      <button class="btn" id="cpuStartBtn" onclick="startCpuGame()">Start</button>
+      <div class="btn-row" id="cpuControls" style="display:none">
+        <button class="btn sec" id="cpuPauseBtn" onclick="togglePause()">Pause</button>
+        <button class="btn dng" onclick="stopCpuGame()">Stop</button>
+      </div>
+    </div>
+
+    <!-- Move list + nav -->
+    <div class="psec">
+      <div class="move-list">
+        <div class="ml-head">
+          <span>Moves</span>
+          <button class="copy-btn" id="copyBtn" onclick="copyPgn()">Copy PGN</button>
+        </div>
+        <div class="ml-body" id="moveList"></div>
+        <div class="nav-bar">
+          <button class="nav-btn" id="nbStart"   onclick="goToStart()"   title="Start (Home)">⏮</button>
+          <button class="nav-btn" id="nbBack"    onclick="goBack()"      title="Back (←)">◀</button>
+          <button class="nav-btn" id="nbForward" onclick="goForward()"   title="Forward (→)">▶</button>
+          <button class="nav-btn" id="nbEnd"     onclick="goToEnd()"     title="End (End)">⏭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="psec">
+      <div class="plbl">Recent Games</div>
+      <div class="history-list" id="gameHistory">
+        <div class="hist-item" style="justify-content:center;color:#475569;">No games yet</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { Chess } from '/js/chess.esm.js';
+
+// ── ELO table ─────────────────────────────────────────────────────────────
+// rc = random-move injection rate for sub-1300 levels; delay = min thinking ms
+const STEPS = [
+  { elo:500,  label:'Beginner',     rc:.85, skill:0,  depth:1,  mt:60,   le:null, delay:800  },
+  { elo:600,  label:'Beginner',     rc:.70, skill:0,  depth:1,  mt:80,   le:null, delay:800  },
+  { elo:700,  label:'Beginner',     rc:.55, skill:1,  depth:1,  mt:100,  le:null, delay:850  },
+  { elo:800,  label:'Novice',       rc:.40, skill:1,  depth:2,  mt:150,  le:null, delay:900  },
+  { elo:900,  label:'Novice',       rc:.26, skill:2,  depth:2,  mt:200,  le:null, delay:950  },
+  { elo:1000, label:'Casual',       rc:.15, skill:3,  depth:3,  mt:null, le:null, delay:1000 },
+  { elo:1100, label:'Casual',       rc:.08, skill:4,  depth:4,  mt:null, le:null, delay:1050 },
+  { elo:1200, label:'Casual',       rc:.03, skill:5,  depth:5,  mt:null, le:null, delay:1100 },
+  { elo:1300, label:'Club Player',  rc:0,   skill:6,  depth:6,  mt:null, le:1320, delay:1150 },
+  { elo:1400, label:'Club Player',  rc:0,   skill:9,  depth:7,  mt:null, le:1400, delay:1200 },
+  { elo:1500, label:'Club Player',  rc:0,   skill:10, depth:8,  mt:null, le:1500, delay:1250 },
+  { elo:1600, label:'Intermediate', rc:0,   skill:11, depth:9,  mt:null, le:1600, delay:1300 },
+  { elo:1700, label:'Intermediate', rc:0,   skill:12, depth:10, mt:null, le:1700, delay:1350 },
+  { elo:1800, label:'Advanced',     rc:0,   skill:13, depth:11, mt:null, le:1800, delay:1400 },
+  { elo:1900, label:'Advanced',     rc:0,   skill:14, depth:12, mt:null, le:1900, delay:1500 },
+  { elo:2000, label:'Expert',       rc:0,   skill:15, depth:13, mt:null, le:2000, delay:1600 },
+  { elo:2100, label:'Expert',       rc:0,   skill:16, depth:14, mt:null, le:2100, delay:1700 },
+  { elo:2200, label:'Master',       rc:0,   skill:17, depth:15, mt:null, le:2200, delay:1800 },
+  { elo:2300, label:'Master',       rc:0,   skill:18, depth:16, mt:null, le:2300, delay:1900 },
+  { elo:2400, label:'Grandmaster',  rc:0,   skill:19, depth:17, mt:null, le:2400, delay:2000 },
+  { elo:2500, label:'Grandmaster',  rc:0,   skill:20, depth:18, mt:null, le:2500, delay:2100 },
+  { elo:2600, label:'Super-GM',     rc:0,   skill:20, depth:20, mt:null, le:2600, delay:2200 },
+  { elo:2700, label:'Super-GM',     rc:0,   skill:20, depth:22, mt:null, le:2700, delay:2300 },
+  { elo:2800, label:'Super-GM',     rc:0,   skill:20, depth:25, mt:null, le:2800, delay:2400 },
+  { elo:'Max',label:'Stockfish Max',rc:0,   skill:20, depth:30, mt:null, le:null, delay:2500 },
+];
+const TCS = [
+  {min:0,inc:0},{min:1,inc:0},{min:2,inc:1},{min:3,inc:0},{min:3,inc:2},
+  {min:5,inc:0},{min:5,inc:3},{min:10,inc:0},{min:15,inc:10},{min:30,inc:0},{min:60,inc:0},
+];
+
+function getStep(idx) { return STEPS[Math.min(idx|0, STEPS.length-1)]; }
+function fmtElo(s)    { return s.elo === 'Max' ? 'Max' : String(s.elo); }
+function getTc()      { return TCS[parseInt(document.getElementById('tcSelect').value)] || TCS[0]; }
+
+// ── Stockfish workers ──────────────────────────────────────────────────────
+function mkWorker() {
+  const w = { worker: new Worker('/js/stockfish.js'), ready: false, resolve: null };
+  w.worker.onmessage = e => {
+    const line = typeof e.data === 'string' ? e.data : String(e.data);
+    if (line === 'readyok') w.ready = true;
+    if (line.startsWith('bestmove') && w.resolve) {
+      const mv = line.split(' ')[1];
+      const cb = w.resolve; w.resolve = null;
+      cb(!mv || mv === '(none)' ? null : mv);
+    }
+  };
+  w.worker.onerror = () => { if (w.resolve) { w.resolve(null); w.resolve = null; } };
+  w.worker.postMessage('uci');
+  w.worker.postMessage('isready');
+  return w;
+}
+function waitReady(w) {
+  return new Promise(r => {
+    if (w.ready) return r();
+    const id = setInterval(() => { if (w.ready) { clearInterval(id); r(); } }, 30);
+  });
+}
+function applyStrength(w, step) {
+  if (step.le) {
+    w.worker.postMessage('setoption name UCI_LimitStrength value true');
+    w.worker.postMessage(`setoption name UCI_Elo value ${step.le}`);
+  } else {
+    w.worker.postMessage('setoption name UCI_LimitStrength value false');
+  }
+  w.worker.postMessage(`setoption name Skill Level value ${step.skill}`);
+}
+async function sfMove(w, fen, step) {
+  await waitReady(w);
+  applyStrength(w, step);
+  return new Promise(resolve => {
+    w.resolve = resolve;
+    w.worker.postMessage('ucinewgame');
+    w.worker.postMessage(`position fen ${fen}`);
+    w.worker.postMessage(step.mt ? `go movetime ${step.mt}` : `go depth ${step.depth}`);
+  });
+}
+async function getAiMove(w, fen, step) {
+  // Inject random legal moves at low ELO to simulate genuine weakness
+  if (step.rc > 0 && Math.random() < step.rc) {
+    const tmp = new Chess(fen);
+    const mvs = tmp.moves({ verbose:true });
+    if (!mvs.length) return null;
+    const m = mvs[Math.floor(Math.random() * mvs.length)];
+    return m.from + m.to + (m.promotion ? 'q' : '');
+  }
+  return sfMove(w, fen, step);
+}
+function aiMinDelay(step) {
+  const tc = getTc();
+  if (tc.min === 0) return step.delay;
+  if (tc.min <= 2)  return Math.min(step.delay, 350);
+  if (tc.min <= 5)  return Math.min(step.delay, 600);
+  return step.delay;
+}
+
+// ── Eval bar ───────────────────────────────────────────────────────────────
+function initEvalWorker() {
+  evalW = new Worker('/js/stockfish.js');
+  evalReady = false;
+  evalW.onmessage = e => {
+    const line = typeof e.data === 'string' ? e.data : String(e.data);
+    if (line === 'readyok') {
+      evalReady = true;
+      if (evalQueue) { doEvalRequest(evalQueue); evalQueue = null; }
+    }
+    // Grab the last score before bestmove (deepest line)
+    if (line.startsWith('info') && line.includes(' score ')) {
+      const m = line.match(/\bscore (cp|mate) (-?\d+)/);
+      if (m) evalBest = { type: m[1], value: parseInt(m[2]) };
+    }
+    if (line.startsWith('bestmove')) {
+      // Stockfish reports from side-to-move perspective; convert to White's
+      const wVal = evalTurn === 'w' ? evalBest.value : -evalBest.value;
+      renderEvalBar(evalBest.type, wVal);
+    }
+  };
+  evalW.onerror = () => {};
+  evalW.postMessage('uci');
+  evalW.postMessage('isready');
+}
+
+function scheduleEval(fen, turn) {
+  evalBest = { type:'cp', value:0 };
+  evalTurn = turn;
+  if (!evalReady) { evalQueue = { fen, turn }; return; }
+  doEvalRequest({ fen, turn });
+}
+
+function doEvalRequest({ fen, turn }) {
+  evalTurn = turn;
+  evalW.postMessage('stop');
+  evalW.postMessage(`position fen ${fen}`);
+  evalW.postMessage('go depth 14');
+}
+
+// Convert white's centipawn advantage to 0–100% white bar fill
+function evalToPercent(type, val) {
+  if (type === 'mate') return val > 0 ? 99 : (val < 0 ? 1 : 50);
+  return Math.max(1, Math.min(99, 50 + 50 * Math.tanh(val / 400)));
+}
+
+function renderEvalBar(type, wVal) {
+  const pct = evalToPercent(type, wVal);
+  document.getElementById('evalFill').style.height = (100 - pct) + '%';
+
+  const lbl   = document.getElementById('evalLbl');
+  let   txt, cls;
+  if (type === 'mate') {
+    txt = wVal > 0 ? `M${wVal}` : (wVal < 0 ? `M${Math.abs(wVal)}` : '=');
+    cls = wVal > 0 ? 'wup' : (wVal < 0 ? 'bup' : 'even');
+  } else {
+    const p = wVal / 100;
+    txt = Math.abs(p) < 0.05 ? '=' : Math.min(9.9, Math.abs(p)).toFixed(1);
+    cls = wVal > 20 ? 'wup' : (wVal < -20 ? 'bup' : 'even');
+  }
+  lbl.textContent = txt;
+  lbl.className   = `eval-lbl ${cls}`;
+}
+
+function resetEvalBar() {
+  if (evalW) evalW.postMessage('stop');
+  document.getElementById('evalFill').style.height = '50%';
+  const lbl = document.getElementById('evalLbl');
+  lbl.textContent = '='; lbl.className = 'eval-lbl even';
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+let game        = new Chess();
+let selected    = null;
+let legalMoves  = null;
+let viewIdx     = 0;   // index into game.history() the user is currently viewing
+let sfW         = null;
+let sfB         = null;
+let currentMode = 'vs-computer'; // 'vs-computer' | 'cpu-vs-cpu'
+let playMode    = 'casual';      // 'casual' | 'challenge' | 'analysis'
+let aiThinking  = false;
+let gameId      = 0;
+let cpuRunning  = false;
+let cpuPaused   = false;
+let cpuSpeed    = 900;
+let cpuTid      = null;
+let dragState   = null;
+
+// eval bar
+let evalW     = null;   // dedicated eval Stockfish worker (never used for moves)
+let evalReady = false;
+let evalQueue = null;   // { fen, turn } buffered while worker initialises
+let evalBest  = { type:'cp', value:0 };
+let evalTurn  = 'w';
+
+// clock
+let whiteMs = 0, blackMs = 0;
+let clockTid    = null;
+let clockActive = null; // 'w' | 'b' | null
+
+// expose to onclick attrs
+window.setMode     = setMode;
+window.setPlayMode = setPlayMode;
+window.setSpeed    = setSpeed;
+window.startCpuGame= startCpuGame;
+window.stopCpuGame = stopCpuGame;
+window.togglePause = togglePause;
+window.takeBack    = takeBack;
+window.copyPgn     = copyPgn;
+window.goToStart   = goToStart;
+window.goBack      = goBack;
+window.goForward   = goForward;
+window.goToEnd     = goToEnd;
+window.goToMove    = goToMove;
+
+// ── ELO sliders ───────────────────────────────────────────────────────────
+function syncEloDisplay(slider, numEl, labelEl, subEl) {
+  const s = getStep(parseInt(slider.value));
+  numEl.textContent   = fmtElo(s);
+  if (labelEl) labelEl.textContent = s.label;
+  if (subEl)   subEl.textContent   = s.elo === 'Max' ? 'Full Strength' : 'ELO Rating';
+}
+const eloSlider  = document.getElementById('eloSlider');
+const wEloSlider = document.getElementById('wEloSlider');
+const bEloSlider = document.getElementById('bEloSlider');
+eloSlider.addEventListener('input', () =>
+  syncEloDisplay(eloSlider, document.getElementById('eloNum'),
+    document.getElementById('eloLabel'), document.getElementById('eloSub')));
+wEloSlider.addEventListener('input', () =>
+  syncEloDisplay(wEloSlider, document.getElementById('wEloNum'), null, null));
+bEloSlider.addEventListener('input', () =>
+  syncEloDisplay(bEloSlider, document.getElementById('bEloNum'), null, null));
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+function clockInit() {
+  clearInterval(clockTid); clockTid = null; clockActive = null;
+  const tc = playMode === 'challenge' ? getTc() : { min:0, inc:0 };
+  whiteMs = tc.min * 60000;
+  blackMs = tc.min * 60000;
+  renderClocks();
+}
+function clockSwitch(toColor) {
+  const tc = playMode === 'challenge' ? getTc() : { min:0, inc:0 };
+  if (tc.inc > 0 && clockActive) {
+    if (clockActive === 'w') whiteMs += tc.inc * 1000;
+    else                     blackMs  += tc.inc * 1000;
+  }
+  clearInterval(clockTid); clockTid = null;
+  clockActive = toColor;
+  if (tc.min === 0) { renderClocks(); return; }
+  clockTid = setInterval(() => {
+    if (clockActive === 'w') whiteMs -= 100;
+    else                     blackMs  -= 100;
+    renderClocks();
+    if ((clockActive === 'w' ? whiteMs : blackMs) <= 0) {
+      whiteMs = Math.max(0, whiteMs); blackMs = Math.max(0, blackMs);
+      clearInterval(clockTid); clockTid = null;
+      onFlag(clockActive);
+    }
+  }, 100);
+  renderClocks();
+}
+function clockStop() {
+  clearInterval(clockTid); clockTid = null; clockActive = null; renderClocks();
+}
+function onFlag(color) {
+  document.getElementById('status').textContent =
+    color === 'w' ? '⏱ Time! Black wins on flag!' : '⏱ Time! White wins on flag!';
+  saveGame('vs-computer', getStep(parseInt(eloSlider.value)).elo, null);
+}
+function fmtMs(ms) {
+  if (ms <= 0) return '0:00';
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+}
+function renderClocks() {
+  const tc   = playMode === 'challenge' ? getTc() : {min:0};
+  const wEl  = document.getElementById('clockWhite');
+  const bEl  = document.getElementById('clockBlack');
+  const wBar = document.getElementById('barWhite');
+  const bBar = document.getElementById('barBlack');
+  wEl.textContent = tc.min === 0 ? '∞' : fmtMs(whiteMs);
+  bEl.textContent = tc.min === 0 ? '∞' : fmtMs(blackMs);
+  wBar.classList.toggle('active-clock', clockActive === 'w');
+  bBar.classList.toggle('active-clock', clockActive === 'b');
+  wEl.classList.toggle('low-time', tc.min > 0 && clockActive === 'w' && whiteMs < 10000);
+  bEl.classList.toggle('low-time', tc.min > 0 && clockActive === 'b' && blackMs < 10000);
+}
+
+// ── Mode / play-mode switching ─────────────────────────────────────────────
+function setMode(mode) {
+  if (cpuRunning) stopCpuGame();
+  currentMode = mode;
+  document.getElementById('tabVC').classList.toggle('active', mode === 'vs-computer');
+  document.getElementById('tabCC').classList.toggle('active', mode === 'cpu-vs-cpu');
+  document.getElementById('vcSection').style.display = mode === 'vs-computer' ? '' : 'none';
+  document.getElementById('ccSection').style.display = mode === 'cpu-vs-cpu'  ? '' : 'none';
+  document.getElementById('barBlackName').textContent = mode === 'vs-computer' ? '⬛ Computer' : '⬛ Black';
+  document.getElementById('barWhiteName').textContent = mode === 'vs-computer' ? '⬜ You'      : '⬜ White';
+  newGame();
+}
+function setPlayMode(pm) {
+  playMode = pm;
+  ['casual','challenge','analysis'].forEach(p =>
+    document.getElementById('pill' + p[0].toUpperCase() + p.slice(1)).classList.toggle('active', p === pm));
+  document.getElementById('eloSection').style.display = pm === 'analysis' ? 'none' : '';
+  document.getElementById('tcRow').style.display      = pm === 'challenge' ? '' : 'none';
+  document.getElementById('takeBackBtn').style.display = pm === 'casual' ? '' : 'none';
+  newGame();
+}
+
+// ── Board helpers ──────────────────────────────────────────────────────────
+function getHistory()  { return game.history({ verbose:true }); }
+function atLivePos()   { return viewIdx >= getHistory().length; }
+
+// Return a Chess instance representing what the board should display at viewIdx
+function getViewGame() {
+  if (atLivePos()) return game;
+  const tmp = new Chess();
+  const h = getHistory();
+  for (let i = 0; i < viewIdx; i++) tmp.move(h[i]);
+  return tmp;
+}
+
+function renderBoard() {
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML = '';
+  const vg = getViewGame();
+  const h  = getHistory();
+
+  // Determine last-move highlights for viewIdx
+  let hFrom = null, hTo = null;
+  if (viewIdx > 0 && h.length > 0) {
+    const m = h[viewIdx - 1];
+    hFrom = m.from; hTo = m.to;
+  }
+
+  for (let rank = 7; rank >= 0; rank--) {
+    for (let file = 0; file < 8; file++) {
+      const sq    = String.fromCharCode(97 + file) + (rank + 1);
+      const light = (rank + file) % 2 === 1;
+      const cell  = document.createElement('div');
+      cell.className = 'sq ' + (light ? 'light' : 'dark');
+      cell.dataset.sq = sq;
+      if (sq === hFrom) cell.classList.add('last-from');
+      if (sq === hTo)   cell.classList.add('last-to');
+      if (selected === sq && atLivePos()) cell.classList.add('selected');
+      if (dragState?.fromSq === sq) cell.classList.add('drag-src');
+      if (legalMoves && atLivePos()) {
+        const m = legalMoves.find(m => m.to === sq);
+        if (m) cell.classList.add(vg.get(sq) ? 'legal-capture' : 'legal-empty');
+      }
+      const piece = vg.get(sq);
+      if (piece) {
+        const img = document.createElement('img');
+        img.src = `/img/pieces/${piece.color}${piece.type.toUpperCase()}.svg`;
+        img.alt = ''; img.draggable = false;
+        cell.appendChild(img);
+      }
+      cell.addEventListener('mousedown', e => onSqDown(sq, e));
+      boardEl.appendChild(cell);
+    }
+  }
+
+  // Rank labels
+  const rc = document.getElementById('rankCol');
+  rc.innerHTML = '';
+  for (let r = 8; r >= 1; r--) { const d = document.createElement('div'); d.textContent=r; rc.appendChild(d); }
+  // File labels
+  const fl = document.getElementById('fileLabels');
+  fl.innerHTML = '';
+  for (const f of 'abcdefgh') { const d=document.createElement('div'); d.className='file-label'; d.textContent=f; fl.appendChild(d); }
+
+  // View banner
+  const banner = document.getElementById('viewBanner');
+  if (!atLivePos()) {
+    document.getElementById('viewPos').textContent = `${viewIdx} / ${h.length}`;
+    banner.classList.add('visible');
+  } else {
+    banner.classList.remove('visible');
+  }
+
+  updateNavBtns();
+}
+
+function updateStatus() {
+  const el = document.getElementById('status');
+  if (game.isCheckmate())
+    el.textContent = game.turn() === 'w' ? '💀 Black wins by checkmate!' : '🏆 White wins by checkmate!';
+  else if (game.isStalemate()) el.textContent = '🤝 Stalemate — Draw';
+  else if (game.isDraw())      el.textContent = '🤝 Draw';
+  else if (game.isCheck())
+    el.textContent = game.turn()==='w' ? '⚠️ White is in check' : '⚠️ Black is in check';
+  else if (currentMode === 'vs-computer' && playMode !== 'analysis')
+    el.textContent = game.turn()==='w' ? '🟢 Your turn (White)' : '⏳ AI is thinking…';
+  else
+    el.textContent = game.turn()==='w' ? '⬜ White to move' : '⬛ Black to move';
+}
+
+function updateMoveList() {
+  const h  = getHistory();
+  const el = document.getElementById('moveList');
+  el.innerHTML = '';
+  for (let i = 0; i < h.length; i += 2) {
+    const row = document.createElement('div');
+    row.className = 'mv-pair';
+    const num = document.createElement('span');
+    num.className = 'mv-num'; num.textContent = `${Math.floor(i/2)+1}.`;
+
+    const mkSan = (idx) => {
+      const span = document.createElement('span');
+      span.className = 'mv-san';
+      span.textContent = h[idx]?.san || '';
+      if (idx + 1 === viewIdx) span.classList.add('current');
+      else if (idx + 1 < viewIdx) span.classList.add('viewed');
+      span.onclick = () => goToMove(idx + 1);
+      return span;
+    };
+
+    row.appendChild(num);
+    row.appendChild(mkSan(i));
+    row.appendChild(mkSan(i + 1));
+    el.appendChild(row);
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateNavBtns() {
+  const h = getHistory();
+  document.getElementById('nbStart').disabled   = viewIdx === 0;
+  document.getElementById('nbBack').disabled    = viewIdx === 0;
+  document.getElementById('nbForward').disabled = viewIdx >= h.length;
+  document.getElementById('nbEnd').disabled     = viewIdx >= h.length;
+}
+
+function setThinking(on, cc = false) {
+  const bar = document.getElementById(cc ? 'thinkingBarCC' : 'thinkingBar');
+  bar?.classList.toggle('active', on);
+  if (!cc) aiThinking = on;
+}
+
+// ── Position navigation ────────────────────────────────────────────────────
+function goToMove(idx) {
+  viewIdx = Math.max(0, Math.min(idx, getHistory().length));
+  selected = null; legalMoves = null;
+  renderBoard(); updateMoveList();
+  const vg = getViewGame();
+  scheduleEval(vg.fen(), vg.turn());
+}
+function goToStart()   { goToMove(0); }
+function goBack()      { goToMove(viewIdx - 1); }
+function goForward()   { goToMove(viewIdx + 1); }
+function goToEnd() {
+  goToMove(getHistory().length);
+  // Resume AI if it's the computer's turn and game still going
+  if (currentMode === 'vs-computer' && playMode !== 'analysis' &&
+      !game.isGameOver() && game.turn() === 'b' && !aiThinking) {
+    triggerAI();
+  }
+}
+
+// ── PGN copy ───────────────────────────────────────────────────────────────
+async function copyPgn() {
+  const pgn = game.pgn();
+  try {
+    await navigator.clipboard.writeText(pgn);
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => { btn.textContent = 'Copy PGN'; }, 1800);
+  } catch(_) {
+    prompt('Copy this PGN:', pgn);
+  }
+}
+
+// ── Drag & drop ────────────────────────────────────────────────────────────
+function canInteract() {
+  if (game.isGameOver()) return false;
+  if (currentMode === 'vs-computer') {
+    if (aiThinking) return false;
+    if (!atLivePos() && playMode !== 'analysis') return false;
+    if (playMode !== 'analysis' && game.turn() !== 'w') return false;
+  }
+  return true;
+}
+
+function onSqDown(sq, e) {
+  if (!canInteract() || e.button !== 0) return;
+  const vg = getViewGame();
+
+  // Complete a pending click-to-move
+  if (selected && selected !== sq && legalMoves?.find(m => m.to === sq)) {
+    const from = selected; selected = null; legalMoves = null;
+    handleMove(from, sq);
+    return;
+  }
+
+  const piece = vg.get(sq);
+  const myColor = currentMode === 'vs-computer' && playMode !== 'analysis'
+    ? 'w'
+    : vg.turn();
+
+  if (!piece || piece.color !== myColor) {
+    selected = null; legalMoves = null; renderBoard(); return;
+  }
+
+  e.preventDefault();
+  selected   = sq;
+  legalMoves = vg.moves({ square: sq, verbose: true });
+
+  const ghost = document.createElement('img');
+  ghost.className = 'drag-ghost';
+  ghost.src = `/img/pieces/${piece.color}${piece.type.toUpperCase()}.svg`;
+  ghost.draggable = false;
+  document.body.appendChild(ghost);
+  dragState = { fromSq: sq, ghost };
+  posGhost(e);
+  renderBoard();
+}
+
+function posGhost(e) {
+  if (!dragState) return;
+  dragState.ghost.style.left = e.clientX + 'px';
+  dragState.ghost.style.top  = e.clientY + 'px';
+}
+
+document.addEventListener('mousemove', e => { if (dragState) posGhost(e); });
+document.addEventListener('mouseup', e => {
+  if (!dragState) return;
+  const { fromSq, ghost } = dragState;
+  dragState = null;
+  ghost.style.display = 'none';
+  const el  = document.elementFromPoint(e.clientX, e.clientY);
+  ghost.remove();
+  const toSq = el?.closest('[data-sq]')?.dataset.sq;
+  if (toSq && toSq !== fromSq && legalMoves?.find(m => m.to === toSq)) {
+    selected = null; legalMoves = null;
+    handleMove(fromSq, toSq);
+  } else if (toSq === fromSq) {
+    renderBoard(); // keep selection
+  } else {
+    selected = null; legalMoves = null; renderBoard();
+  }
+});
+
+// ── Move logic ─────────────────────────────────────────────────────────────
+function handleMove(from, to, promotion = 'q') {
+  // In analysis mode, branch the game from the current view position
+  if (!atLivePos() && playMode === 'analysis') {
+    const h = getHistory().slice(0, viewIdx);
+    gameId++;
+    game = new Chess();
+    h.forEach(m => game.move(m));
+  }
+  doMove(from, to, promotion);
+}
+
+function doMove(from, to, promotion = 'q') {
+  const p      = game.get(from);
+  const isPromo = p?.type === 'p' && (to[1] === '8' || to[1] === '1');
+  const move   = game.move({ from, to, promotion: isPromo ? promotion : undefined });
+  if (!move) return false;
+
+  viewIdx = game.history().length; // stay at live position after any move
+  selected = null; legalMoves = null;
+  renderBoard(); updateStatus(); updateMoveList();
+  scheduleEval(game.fen(), game.turn());
+
+  if (currentMode === 'vs-computer' && playMode !== 'analysis') {
+    if (game.isGameOver()) {
+      clockStop();
+      saveGame('vs-computer', getStep(parseInt(eloSlider.value)).elo, null);
+    } else {
+      clockSwitch(game.turn());
+      if (game.turn() === 'b') triggerAI();
+    }
+  }
+  return true;
+}
+
+// ── Take-back (Casual only) ────────────────────────────────────────────────
+function takeBack() {
+  if (playMode !== 'casual') return;
+  const h = getHistory();
+  if (h.length === 0) return;
+  gameId++; // cancel any pending AI computation
+  setThinking(false);
+  // Undo AI move then player move (or just player move if AI hasn't moved yet)
+  if (game.turn() === 'w' && h.length >= 2) { game.undo(); game.undo(); }
+  else if (game.turn() === 'b')              { game.undo(); }
+  clockStop();
+  viewIdx = game.history().length;
+  selected = null; legalMoves = null;
+  renderBoard(); updateStatus(); updateMoveList();
+}
+
+// ── AI engine ─────────────────────────────────────────────────────────────
+async function triggerAI() {
+  if (aiThinking) return;
+  setThinking(true);
+  const myId = gameId;
+  const step = getStep(parseInt(eloSlider.value));
+  const fen  = game.fen();
+
+  const [best] = await Promise.all([
+    getAiMove(sfW, fen, step),
+    new Promise(r => setTimeout(r, aiMinDelay(step))),
+  ]);
+
+  setThinking(false);
+  if (myId !== gameId || game.isGameOver()) return;
+  if (!best) return;
+  doMove(best.slice(0,2), best.slice(2,4), best[4] || 'q');
+}
+
+// ── CPU vs CPU ─────────────────────────────────────────────────────────────
+async function startCpuGame() {
+  if (sfW) sfW.worker.terminate();
+  if (sfB) sfB.worker.terminate();
+  sfW = mkWorker(); sfB = mkWorker();
+  game = new Chess(); gameId++;
+  viewIdx = 0; selected = null; legalMoves = null;
+  cpuRunning = true; cpuPaused = false;
+  document.getElementById('cpuStartBtn').style.display  = 'none';
+  document.getElementById('cpuControls').style.display  = '';
+  document.getElementById('cpuPauseBtn').textContent    = 'Pause';
+  document.getElementById('statusCC').style.display     = '';
+  document.getElementById('moveList').innerHTML = '';
+  renderBoard();
+  // Wait for both workers to be ready before starting
+  await Promise.all([waitReady(sfW), waitReady(sfB)]);
+  if (!cpuRunning) return;
+  scheduleCpuMove();
+}
+
+function stopCpuGame() {
+  cpuRunning = false;
+  if (cpuTid) { clearTimeout(cpuTid); cpuTid = null; }
+  document.getElementById('cpuStartBtn').style.display = '';
+  document.getElementById('cpuControls').style.display = 'none';
+  document.getElementById('statusCC').style.display    = 'none';
+  setThinking(false, true);
+}
+
+function togglePause() {
+  cpuPaused = !cpuPaused;
+  document.getElementById('cpuPauseBtn').textContent = cpuPaused ? 'Resume' : 'Pause';
+  if (!cpuPaused) scheduleCpuMove();
+}
+
+function setSpeed(ms, btn) {
+  cpuSpeed = ms;
+  document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function scheduleCpuMove() {
+  if (!cpuRunning || cpuPaused) return;
+  cpuTid = setTimeout(runCpuMove, cpuSpeed);
+}
+
+async function runCpuMove() {
+  if (!cpuRunning || cpuPaused || game.isGameOver()) return;
+
+  const myId    = gameId;
+  const isWhite = game.turn() === 'w';
+  const worker  = isWhite ? sfW : sfB;
+  const step    = getStep(parseInt((isWhite ? wEloSlider : bEloSlider).value));
+
+  const statusEl = document.getElementById('statusCCBox');
+  if (statusEl) statusEl.textContent = (isWhite ? '⬜ White' : '⬛ Black') + ' is thinking…';
+  setThinking(true, true);
+
+  let best = null;
+  try {
+    best = await sfMove(worker, game.fen(), step);
+  } catch (err) {
+    console.error('Stockfish error in CPU vs CPU:', err);
+  }
+
+  setThinking(false, true);
+  if (myId !== gameId || !cpuRunning) return;
+
+  if (!best) {
+    console.warn('No move returned; stopping CPU vs CPU');
+    stopCpuGame(); return;
+  }
+
+  const from = best.slice(0,2), to = best.slice(2,4), promo = best[4] || 'q';
+  const p = game.get(from);
+  const isPromo = p?.type === 'p' && (to[1] === '8' || to[1] === '1');
+  const moved = game.move({ from, to, promotion: isPromo ? promo : undefined });
+  if (!moved) {
+    console.error('Illegal move from Stockfish:', best, 'FEN:', game.fen());
+    stopCpuGame(); return;
+  }
+
+  viewIdx = game.history().length;
+  renderBoard(); updateMoveList();
+  scheduleEval(game.fen(), game.turn());
+  if (statusEl) statusEl.textContent = game.turn()==='w' ? '⬜ White to move' : '⬛ Black to move';
+
+  if (game.isGameOver()) {
+    statusEl.textContent = game.isCheckmate()
+      ? (game.turn()==='w' ? '💀 Black wins!' : '🏆 White wins!')
+      : '🤝 Draw';
+    await saveGame('cpu-vs-cpu',
+      getStep(parseInt(wEloSlider.value)).elo,
+      getStep(parseInt(bEloSlider.value)).elo);
+    stopCpuGame(); return;
+  }
+
+  scheduleCpuMove();
+}
+
+// ── Game lifecycle ─────────────────────────────────────────────────────────
+function newGame() {
+  if (cpuRunning) stopCpuGame();
+  gameId++;
+  game = new Chess();
+  viewIdx = 0; selected = null; legalMoves = null;
+  if (dragState) { dragState.ghost.remove(); dragState = null; }
+  setThinking(false);
+  clockInit();
+  if (currentMode === 'vs-computer') {
+    if (sfW) sfW.worker.terminate();
+    sfW = mkWorker();
+  }
+  document.getElementById('moveList').innerHTML = '';
+  resetEvalBar();
+  renderBoard(); updateStatus(); updateMoveList();
+}
+
+async function saveGame(mode, wElo, bElo) {
+  const result = game.isCheckmate()
+    ? (game.turn() === 'w' ? 'loss' : 'win')
+    : 'draw';
+  try {
+    await fetch('/api/games', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        pgn: game.pgn(), result, mode,
+        white_elo: wElo === 'Max' ? 9999 : (Number(wElo)||null),
+        black_elo: bElo === 'Max' ? 9999 : (Number(bElo)||null),
+      }),
+    });
+  } catch(_) {}
+  loadHistory();
+}
+
+// ── Buttons ────────────────────────────────────────────────────────────────
+document.getElementById('newGameBtn').addEventListener('click', newGame);
+document.getElementById('resignBtn').addEventListener('click', async () => {
+  if (game.isGameOver()) { newGame(); return; }
+  clockStop();
+  const step = getStep(parseInt(eloSlider.value));
+  await fetch('/api/games', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      pgn: game.pgn(), result:'resign', mode:'vs-computer',
+      white_elo: null,
+      black_elo: step.elo === 'Max' ? 9999 : step.elo,
+    }),
+  });
+  document.getElementById('status').textContent = '🏳 Resigned';
+  loadHistory();
+  setTimeout(newGame, 1500);
+});
+
+// ── History ────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  let rows = [];
+  try { rows = await fetch('/api/games').then(r => r.json()); } catch(_){}
+  const el = document.getElementById('gameHistory');
+  if (!rows.length) {
+    el.innerHTML = '<div class="hist-item" style="justify-content:center;color:#475569;">No games yet</div>';
+    return;
+  }
+  const icons = { win:'🏆', loss:'💀', draw:'🤝', resign:'🏳', flag:'⏱' };
+  el.innerHTML = rows.slice(0,8).map(g => {
+    const modeStr = g.difficulty === 'cpu-vs-cpu' ? 'CPU vs CPU' : 'vs AI';
+    const wE = g.white_elo === 9999 ? 'Max' : g.white_elo;
+    const bE = g.black_elo === 9999 ? 'Max' : g.black_elo;
+    const eloStr = g.difficulty === 'cpu-vs-cpu'
+      ? `W:${wE} B:${bE}`
+      : (bE ? `ELO ${bE}` : g.difficulty||'');
+    return `<div class="hist-item">
+      <span>${icons[g.result]||'🎮'} <span class="res">${g.result}</span>
+        <span style="color:#475569;font-size:10px;">${modeStr}</span></span>
+      <div class="hist-meta">${eloStr}<br>${new Date(g.started_at).toLocaleDateString()}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); goBack(); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); goForward(); }
+  if (e.key === 'Home')       { e.preventDefault(); goToStart(); }
+  if (e.key === 'End')        { e.preventDefault(); goToEnd(); }
+});
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+(async () => {
+  initEvalWorker();
+  const me = await fetch('/api/me').then(r => r.json());
+  document.getElementById('navUser').textContent = me.username;
+  syncEloDisplay(eloSlider,  document.getElementById('eloNum'),
+    document.getElementById('eloLabel'), document.getElementById('eloSub'));
+  syncEloDisplay(wEloSlider, document.getElementById('wEloNum'), null, null);
+  syncEloDisplay(bEloSlider, document.getElementById('bEloNum'), null, null);
+  await loadHistory();
+  newGame();
+})();
+</script>
+</body>
+</html>
