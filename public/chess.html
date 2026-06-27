@@ -58,7 +58,7 @@
       height: min(504px, calc(100vw - 340px));
       border: 3px solid #0f172a; border-radius: 3px;
       box-shadow: 0 8px 32px rgba(0,0,0,.6), 0 0 0 1px #334155;
-      overflow: hidden;
+      overflow: hidden; position: relative;
     }
     .file-labels {
       display: grid; grid-template-columns: repeat(8, 1fr);
@@ -280,6 +280,9 @@
     }
     .toast.show { display:block; }
 
+    /* opening status badge */
+    #openingStatus { font-size:11px; color:#a5b4fc; padding:3px 2px; min-height:16px; }
+
     /* history */
     .history-list { max-height:140px; overflow-y:auto; }
     .hist-item {
@@ -393,6 +396,15 @@
             <option value="10">60+0 Classical</option>
           </select>
         </div>
+      </div>
+
+      <!-- Opening Trainer -->
+      <div id="openingSection" class="psec">
+        <div class="plbl">Opening Trainer</div>
+        <select id="openingSelect" class="tc-select">
+          <option value="">— No Opening —</option>
+        </select>
+        <div id="openingStatus"></div>
       </div>
 
       <button class="btn" id="newGameBtn">New Game</button>
@@ -519,6 +531,44 @@ const TCS = [
 function getStep(idx) { return STEPS[Math.min(idx|0, STEPS.length-1)]; }
 function fmtElo(s)    { return s.elo === 'Max' ? 'Max' : String(s.elo); }
 function getTc()      { return TCS[parseInt(document.getElementById('tcSelect').value)] || TCS[0]; }
+
+// ── Opening book ───────────────────────────────────────────────────────────
+const OPENINGS = [
+  // 1.e4 e5 – Open Games
+  { group:'1.e4 e5 — Open Games',  eco:'C50', name:'Italian Game',            moves:['e4','e5','Nf3','Nc6','Bc4'] },
+  { group:'1.e4 e5 — Open Games',  eco:'C60', name:'Ruy Lopez',               moves:['e4','e5','Nf3','Nc6','Bb5'] },
+  { group:'1.e4 e5 — Open Games',  eco:'C78', name:'Ruy Lopez: Morphy Def.',  moves:['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'] },
+  { group:'1.e4 e5 — Open Games',  eco:'C67', name:'Ruy Lopez: Berlin',       moves:['e4','e5','Nf3','Nc6','Bb5','Nf6','O-O','Nxe4','d4','Nd6'] },
+  { group:'1.e4 e5 — Open Games',  eco:'C30', name:"King's Gambit",           moves:['e4','e5','f4'] },
+  { group:'1.e4 e5 — Open Games',  eco:'C33', name:"King's Gambit Accepted",  moves:['e4','e5','f4','exf4','Nf3'] },
+  { group:'1.e4 e5 — Open Games',  eco:'C42', name:'Petrov Defense',          moves:['e4','e5','Nf3','Nf6'] },
+  { group:'1.e4 e5 — Open Games',  eco:'C54', name:'Giuoco Piano',            moves:['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6','d4','exd4','cxd4'] },
+  // 1.e4 – Semi-Open
+  { group:'1.e4 — Semi-Open',      eco:'B20', name:'Sicilian Defense',        moves:['e4','c5'] },
+  { group:'1.e4 — Semi-Open',      eco:'B90', name:'Sicilian: Najdorf',       moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'] },
+  { group:'1.e4 — Semi-Open',      eco:'B70', name:'Sicilian: Dragon',        moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','g6'] },
+  { group:'1.e4 — Semi-Open',      eco:'B44', name:'Sicilian: Kan',           moves:['e4','c5','Nf3','e6','d4','cxd4','Nxd4','a6'] },
+  { group:'1.e4 — Semi-Open',      eco:'B85', name:'Sicilian: Scheveningen',  moves:['e4','c5','Nf3','e6','d4','cxd4','Nxd4','Nf6','Nc3','d6'] },
+  { group:'1.e4 — Semi-Open',      eco:'C00', name:'French Defense',          moves:['e4','e6','d4','d5'] },
+  { group:'1.e4 — Semi-Open',      eco:'C18', name:'French: Winawer',         moves:['e4','e6','d4','d5','Nc3','Bb4'] },
+  { group:'1.e4 — Semi-Open',      eco:'B10', name:'Caro-Kann Defense',       moves:['e4','c6','d4','d5'] },
+  { group:'1.e4 — Semi-Open',      eco:'B07', name:'Pirc Defense',            moves:['e4','d6','d4','Nf6','Nc3','g6'] },
+  // 1.d4 – Closed
+  { group:'1.d4 — Closed',         eco:'D06', name:"Queen's Gambit",          moves:['d4','d5','c4'] },
+  { group:'1.d4 — Closed',         eco:'D30', name:"QGD (Classical)",         moves:['d4','d5','c4','e6','Nc3','Nf6','Bg5'] },
+  { group:'1.d4 — Closed',         eco:'D20', name:"Queen's Gambit Accepted", moves:['d4','d5','c4','dxc4','Nf3'] },
+  { group:'1.d4 — Closed',         eco:'E97', name:"King's Indian Defense",   moves:['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6','Nf3'] },
+  { group:'1.d4 — Closed',         eco:'D80', name:'Grünfeld Defense',        moves:['d4','Nf6','c4','g6','Nc3','d5'] },
+  { group:'1.d4 — Closed',         eco:'E21', name:'Nimzo-Indian Defense',    moves:['d4','Nf6','c4','e6','Nc3','Bb4'] },
+  { group:'1.d4 — Closed',         eco:'E12', name:"Queen's Indian Defense",  moves:['d4','Nf6','c4','e6','Nf3','b6'] },
+  { group:'1.d4 — Closed',         eco:'A80', name:'Dutch Defense',           moves:['d4','f5'] },
+  { group:'1.d4 — Closed',         eco:'D02', name:'London System',           moves:['d4','d5','Nf3','Nf6','Bf4'] },
+  { group:'1.d4 — Closed',         eco:'E05', name:'Catalan Opening',         moves:['d4','Nf6','c4','e6','g3'] },
+  // Flank
+  { group:'Flank Openings',        eco:'A20', name:'English Opening',         moves:['c4','e5'] },
+  { group:'Flank Openings',        eco:'A07', name:'Reti Opening',            moves:['Nf3','d5','c4'] },
+  { group:'Flank Openings',        eco:'A45', name:'Trompowsky Attack',       moves:['d4','Nf6','Bg5'] },
+];
 
 // ── Stockfish workers ──────────────────────────────────────────────────────
 function mkWorker() {
@@ -676,6 +726,10 @@ let mpColor     = null; // 'w' | 'b'
 let mpOpponent  = '';
 let mpDrawOffered = false;
 
+// opening trainer
+let selectedOpening  = null;
+let openingPositions = [];  // FEN after each half-move (index 0 = start position)
+
 // eval bar
 let evalW     = null;   // dedicated eval Stockfish worker (never used for moves)
 let evalReady = false;
@@ -705,6 +759,7 @@ window.goToMove    = goToMove;
 window.goToLobby   = goToLobby;
 window.mpOfferDraw = mpOfferDraw;
 window.mpResign    = mpResign;
+window.setOpening  = setOpening;
 
 // ── ELO sliders ───────────────────────────────────────────────────────────
 function syncEloDisplay(slider, numEl, labelEl, subEl) {
@@ -790,15 +845,18 @@ function setMode(mode) {
   document.getElementById('ccSection').style.display = mode === 'cpu-vs-cpu'  ? '' : 'none';
   document.getElementById('barBlackName').textContent = mode === 'vs-computer' ? '⬛ Computer' : '⬛ Black';
   document.getElementById('barWhiteName').textContent = mode === 'vs-computer' ? '⬜ You'      : '⬜ White';
+  // opening trainer only relevant vs computer
+  document.getElementById('openingSection').style.display = mode === 'vs-computer' ? '' : 'none';
   newGame();
 }
 function setPlayMode(pm) {
   playMode = pm;
   ['casual','challenge','analysis'].forEach(p =>
     document.getElementById('pill' + p[0].toUpperCase() + p.slice(1)).classList.toggle('active', p === pm));
-  document.getElementById('eloSection').style.display = pm === 'analysis' ? 'none' : '';
-  document.getElementById('tcRow').style.display      = pm === 'challenge' ? '' : 'none';
-  document.getElementById('takeBackBtn').style.display = pm === 'casual' ? '' : 'none';
+  document.getElementById('eloSection').style.display     = pm === 'analysis' ? 'none' : '';
+  document.getElementById('openingSection').style.display = pm === 'analysis' ? 'none' : '';
+  document.getElementById('tcRow').style.display          = pm === 'challenge' ? '' : 'none';
+  document.getElementById('takeBackBtn').style.display    = pm === 'casual' ? '' : 'none';
   newGame();
 }
 
@@ -879,6 +937,12 @@ function renderBoard() {
   }
 
   updateNavBtns();
+
+  // Opening hint arrow (only at live position, vs-computer, non-analysis)
+  if (atLivePos() && currentMode === 'vs-computer' && playMode !== 'analysis') {
+    const hint = getHintArrow();
+    if (hint) renderOpeningArrow(hint.from, hint.to);
+  }
 }
 
 function updateStatus() {
@@ -1072,7 +1136,7 @@ function doMove(from, to, promotion = 'q') {
 
   viewIdx = game.history().length; // stay at live position after any move
   selected = null; legalMoves = null;
-  renderBoard(); updateStatus(); updateMoveList();
+  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
   scheduleEval(game.fen(), game.turn());
 
   if (currentMode === 'multiplayer') {
@@ -1111,6 +1175,20 @@ function takeBack() {
 // ── AI engine ─────────────────────────────────────────────────────────────
 async function triggerAI() {
   if (aiThinking) return;
+
+  // Play opening book move when available (small delay to feel natural)
+  const bookSan = getBookMove();
+  if (bookSan) {
+    setThinking(true);
+    const myId = gameId;
+    await new Promise(r => setTimeout(r, 350 + Math.random() * 300));
+    setThinking(false);
+    if (myId !== gameId || game.isGameOver()) return;
+    const tmp = new Chess(game.fen());
+    const m   = tmp.move(bookSan);
+    if (m) { doMove(m.from, m.to, m.promotion || 'q'); return; }
+  }
+
   setThinking(true);
   const myId = gameId;
   const step = getStep(parseInt(eloSlider.value));
@@ -1125,6 +1203,123 @@ async function triggerAI() {
   if (myId !== gameId || game.isGameOver()) return;
   if (!best) return;
   doMove(best.slice(0,2), best.slice(2,4), best[4] || 'q');
+}
+
+// ── Opening trainer ────────────────────────────────────────────────────────
+function setOpening(val) {
+  if (!val) {
+    selectedOpening  = null;
+    openingPositions = [];
+  } else {
+    const idx = parseInt(val);
+    selectedOpening = OPENINGS[idx] || null;
+    openingPositions = [];
+    if (selectedOpening) {
+      const tmp = new Chess();
+      openingPositions.push(tmp.fen());
+      for (const san of selectedOpening.moves) {
+        if (!tmp.move(san)) break;
+        openingPositions.push(tmp.fen());
+      }
+    }
+  }
+  updateOpeningStatus();
+  renderBoard();
+}
+
+// Returns the current half-move index if position matches the opening, else -1
+function getOpeningIdx() {
+  if (!selectedOpening || !openingPositions.length) return -1;
+  const h = game.history().length;
+  if (h >= openingPositions.length) return -1;
+  const cur = game.fen().split(' ').slice(0, 4).join(' ');
+  const exp = openingPositions[h].split(' ').slice(0, 4).join(' ');
+  return cur === exp ? h : -1;
+}
+
+// Returns the next book move SAN (for computer's side), or null if out of book
+function getBookMove() {
+  const idx = getOpeningIdx();
+  if (idx < 0) return null;
+  return selectedOpening.moves[idx] || null;
+}
+
+// Returns { from, to } for the player's (White's) next recommended book move, or null
+function getHintArrow() {
+  const h = game.history().length;
+  if (h % 2 !== 0) return null;  // it's Black's turn — no hint needed
+  const bookSan = getBookMove();
+  if (!bookSan) return null;
+  const tmp = new Chess(game.fen());
+  const m   = tmp.move(bookSan);
+  return m ? { from: m.from, to: m.to } : null;
+}
+
+function renderOpeningArrow(from, to) {
+  const boardEl = document.getElementById('board');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible;';
+
+  const size = boardEl.offsetWidth || 504;
+  svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+
+  const flip  = currentMode === 'multiplayer' && mpColor === 'b';
+  const sqSz  = size / 8;
+
+  function sqCenter(sq) {
+    const file = sq.charCodeAt(0) - 97;
+    const rank = parseInt(sq[1]) - 1;
+    return {
+      x: flip ? (7 - file + 0.5) * sqSz : (file + 0.5) * sqSz,
+      y: flip ? (rank + 0.5) * sqSz      : (7 - rank + 0.5) * sqSz,
+    };
+  }
+
+  const f  = sqCenter(from);
+  const t  = sqCenter(to);
+  const dx = t.x - f.x, dy = t.y - f.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return;
+  const ux = dx / len, uy = dy / len;
+
+  const lw = sqSz * 0.14;  // line width
+  const hw = sqSz * 0.22;  // arrowhead half-width
+  const hl = sqSz * 0.28;  // arrowhead length
+  const px = -uy * hw, py = ux * hw;
+
+  const sx = f.x + ux * sqSz * 0.22;
+  const sy = f.y + uy * sqSz * 0.22;
+  const ex = t.x - ux * hl;
+  const ey = t.y - uy * hl;
+
+  svg.innerHTML = `
+    <line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}"
+      stroke="rgba(50,210,80,0.82)" stroke-width="${lw.toFixed(1)}" stroke-linecap="round"/>
+    <polygon points="${t.x.toFixed(1)},${t.y.toFixed(1)} ${(ex+px).toFixed(1)},${(ey+py).toFixed(1)} ${(ex-px).toFixed(1)},${(ey-py).toFixed(1)}"
+      fill="rgba(50,210,80,0.82)"/>
+  `;
+  boardEl.appendChild(svg);
+}
+
+function updateOpeningStatus() {
+  const el = document.getElementById('openingStatus');
+  if (!el) return;
+  if (!selectedOpening) { el.textContent = ''; return; }
+
+  const h   = game.history().length;
+  const idx = getOpeningIdx();
+
+  if (idx < 0) {
+    el.textContent = `↗ Deviated from ${selectedOpening.name}`;
+    el.style.color = '#64748b';
+  } else if (idx >= selectedOpening.moves.length) {
+    el.textContent = `✓ ${selectedOpening.name} — complete!`;
+    el.style.color = '#4ade80';
+  } else {
+    const moveNum = Math.floor(idx / 2) + 1;
+    el.textContent = `📖 ${selectedOpening.name} — move ${moveNum}`;
+    el.style.color = '#a5b4fc';
+  }
 }
 
 // ── CPU vs CPU ─────────────────────────────────────────────────────────────
@@ -1242,7 +1437,7 @@ function newGame() {
   }
   document.getElementById('moveList').innerHTML = '';
   resetEvalBar();
-  renderBoard(); updateStatus(); updateMoveList();
+  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
 }
 
 async function saveGame(mode, wElo, bElo) {
@@ -1478,8 +1673,34 @@ function initMultiplayer(roomId) {
   });
 }
 
+// ── Opening selector setup ─────────────────────────────────────────────────
+document.getElementById('openingSelect').addEventListener('change', function() {
+  setOpening(this.value);
+});
+
 // ── Boot ───────────────────────────────────────────────────────────────────
 (async () => {
+  // Populate opening dropdown with optgroups
+  (function() {
+    const sel = document.getElementById('openingSelect');
+    const groups = {};
+    OPENINGS.forEach((o, i) => {
+      if (!groups[o.group]) groups[o.group] = [];
+      groups[o.group].push({ idx: i, name: o.name, eco: o.eco });
+    });
+    Object.entries(groups).forEach(([groupName, opts]) => {
+      const grp = document.createElement('optgroup');
+      grp.label = groupName;
+      opts.forEach(({ idx, name, eco }) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `${name} (${eco})`;
+        grp.appendChild(opt);
+      });
+      sel.appendChild(grp);
+    });
+  })();
+
   initEvalWorker();
   const me = await fetch('/api/me').then(r => r.json());
   document.getElementById('navUser').textContent = me.username;
