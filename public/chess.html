@@ -286,6 +286,19 @@
     /* opening status badge */
     #openingStatus { font-size:11px; color:#a5b4fc; padding:3px 2px; min-height:16px; }
 
+    /* auto-detected opening bar */
+    #autoOpeningBar { font-size:12px; color:#a5b4fc; min-height:17px; padding:2px 0 1px; }
+
+    /* analysis opening info panel */
+    .opening-info-panel {
+      background:#1e293b; border:1px solid #2d4a7a; border-radius:8px;
+      padding:10px 13px; margin-bottom:10px; display:none;
+    }
+    .opening-info-panel.visible { display:block; }
+    .oi-name { font-size:13px; font-weight:700; color:#a5b4fc; margin-bottom:5px; }
+    .oi-eco  { font-size:10px; color:#475569; margin-bottom:5px; }
+    .oi-desc { font-size:11px; color:#94a3b8; line-height:1.55; }
+
     /* history */
     .history-list { max-height:140px; overflow-y:auto; }
     .hist-item {
@@ -367,6 +380,7 @@
       <div class="psec">
         <div class="status-box" id="status">Loading…</div>
         <div class="thinking-bar" id="thinkingBar"><div class="fill"></div></div>
+      <div id="autoOpeningBar"></div>
       </div>
 
       <!-- ELO (hidden in analysis) -->
@@ -410,6 +424,13 @@
           <option value="">— No Opening —</option>
         </select>
         <div id="openingStatus"></div>
+      </div>
+
+      <!-- Analysis mode opening info panel -->
+      <div class="opening-info-panel" id="openingInfoPanel">
+        <div class="oi-name" id="openingInfoName"></div>
+        <div class="oi-eco"  id="openingInfoEco"></div>
+        <div class="oi-desc" id="openingInfoDesc"></div>
       </div>
 
       <button class="btn" id="newGameBtn">New Game</button>
@@ -540,43 +561,377 @@ function getStep(idx) { return STEPS[Math.min(idx|0, STEPS.length-1)]; }
 function fmtElo(s)    { return s.elo === 'Max' ? 'Max' : String(s.elo); }
 function getTc()      { return TCS[parseInt(document.getElementById('tcSelect').value)] || TCS[0]; }
 
-// ── Opening book ───────────────────────────────────────────────────────────
-const OPENINGS = [
-  // 1.e4 e5 – Open Games
-  { group:'1.e4 e5 — Open Games',  eco:'C50', name:'Italian Game',            moves:['e4','e5','Nf3','Nc6','Bc4'] },
-  { group:'1.e4 e5 — Open Games',  eco:'C60', name:'Ruy Lopez',               moves:['e4','e5','Nf3','Nc6','Bb5'] },
-  { group:'1.e4 e5 — Open Games',  eco:'C78', name:'Ruy Lopez: Morphy Def.',  moves:['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'] },
-  { group:'1.e4 e5 — Open Games',  eco:'C67', name:'Ruy Lopez: Berlin',       moves:['e4','e5','Nf3','Nc6','Bb5','Nf6','O-O','Nxe4','d4','Nd6'] },
-  { group:'1.e4 e5 — Open Games',  eco:'C30', name:"King's Gambit",           moves:['e4','e5','f4'] },
-  { group:'1.e4 e5 — Open Games',  eco:'C33', name:"King's Gambit Accepted",  moves:['e4','e5','f4','exf4','Nf3'] },
-  { group:'1.e4 e5 — Open Games',  eco:'C42', name:'Petrov Defense',          moves:['e4','e5','Nf3','Nf6'] },
-  { group:'1.e4 e5 — Open Games',  eco:'C54', name:'Giuoco Piano',            moves:['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6','d4','exd4','cxd4'] },
-  // 1.e4 – Semi-Open
-  { group:'1.e4 — Semi-Open',      eco:'B20', name:'Sicilian Defense',        moves:['e4','c5'] },
-  { group:'1.e4 — Semi-Open',      eco:'B90', name:'Sicilian: Najdorf',       moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'] },
-  { group:'1.e4 — Semi-Open',      eco:'B70', name:'Sicilian: Dragon',        moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','g6'] },
-  { group:'1.e4 — Semi-Open',      eco:'B44', name:'Sicilian: Kan',           moves:['e4','c5','Nf3','e6','d4','cxd4','Nxd4','a6'] },
-  { group:'1.e4 — Semi-Open',      eco:'B85', name:'Sicilian: Scheveningen',  moves:['e4','c5','Nf3','e6','d4','cxd4','Nxd4','Nf6','Nc3','d6'] },
-  { group:'1.e4 — Semi-Open',      eco:'C00', name:'French Defense',          moves:['e4','e6','d4','d5'] },
-  { group:'1.e4 — Semi-Open',      eco:'C18', name:'French: Winawer',         moves:['e4','e6','d4','d5','Nc3','Bb4'] },
-  { group:'1.e4 — Semi-Open',      eco:'B10', name:'Caro-Kann Defense',       moves:['e4','c6','d4','d5'] },
-  { group:'1.e4 — Semi-Open',      eco:'B07', name:'Pirc Defense',            moves:['e4','d6','d4','Nf6','Nc3','g6'] },
-  // 1.d4 – Closed
-  { group:'1.d4 — Closed',         eco:'D06', name:"Queen's Gambit",          moves:['d4','d5','c4'] },
-  { group:'1.d4 — Closed',         eco:'D30', name:"QGD (Classical)",         moves:['d4','d5','c4','e6','Nc3','Nf6','Bg5'] },
-  { group:'1.d4 — Closed',         eco:'D20', name:"Queen's Gambit Accepted", moves:['d4','d5','c4','dxc4','Nf3'] },
-  { group:'1.d4 — Closed',         eco:'E97', name:"King's Indian Defense",   moves:['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6','Nf3'] },
-  { group:'1.d4 — Closed',         eco:'D80', name:'Grünfeld Defense',        moves:['d4','Nf6','c4','g6','Nc3','d5'] },
-  { group:'1.d4 — Closed',         eco:'E21', name:'Nimzo-Indian Defense',    moves:['d4','Nf6','c4','e6','Nc3','Bb4'] },
-  { group:'1.d4 — Closed',         eco:'E12', name:"Queen's Indian Defense",  moves:['d4','Nf6','c4','e6','Nf3','b6'] },
-  { group:'1.d4 — Closed',         eco:'A80', name:'Dutch Defense',           moves:['d4','f5'] },
-  { group:'1.d4 — Closed',         eco:'D02', name:'London System',           moves:['d4','d5','Nf3','Nf6','Bf4'] },
-  { group:'1.d4 — Closed',         eco:'E05', name:'Catalan Opening',         moves:['d4','Nf6','c4','e6','g3'] },
-  // Flank
-  { group:'Flank Openings',        eco:'A20', name:'English Opening',         moves:['c4','e5'] },
-  { group:'Flank Openings',        eco:'A07', name:'Reti Opening',            moves:['Nf3','d5','c4'] },
-  { group:'Flank Openings',        eco:'A45', name:'Trompowsky Attack',       moves:['d4','Nf6','Bg5'] },
+// ── Opening book (ECO_BOOK) ────────────────────────────────────────────────
+// Used for both the Opening Trainer dropdown and auto-detection in Casual/Analysis.
+const ECO_BOOK = [
+  // ═══ Open Games (1.e4 e5) ═══════════════════════════════════════════════
+  { group:'Open Games (1.e4 e5)', eco:'C20', name:"King's Pawn Opening",
+    moves:['e4','e5'],
+    description:"The most classical of starts. Both sides immediately contest the center. White has a broad choice of systems: Italian, Ruy Lopez, Scotch, King's Gambit, and many more. Black must choose a reply that matches their style." },
+  { group:'Open Games (1.e4 e5)', eco:'C44', name:'Scotch Game',
+    moves:['e4','e5','Nf3','Nc6','d4'],
+    description:"White immediately challenges the center with d4, avoiding deep Ruy Lopez theory. After 3...exd4 4.Nxd4 the position opens quickly. White gets rapid development; Black must find active piece play to equalize." },
+  { group:'Open Games (1.e4 e5)', eco:'C45', name:'Scotch Game: Accepted',
+    moves:['e4','e5','Nf3','Nc6','d4','exd4','Nxd4'],
+    description:"The main line of the Scotch. After Nxd4 centralizes the knight, Black plays ...Bc5 or ...Nf6 to challenge White's control. The position is open with dynamic possibilities for both sides." },
+  { group:'Open Games (1.e4 e5)', eco:'C45', name:'Scotch Game: Mieses Variation',
+    moves:['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6','Nxc6','bxc6','e5'],
+    description:"White advances the pawn to e5, attacking Black's knight. Black must react energetically — ...Qe7 or ...Nd5 are the main tries. White has a space advantage but Black's bishop pair provides long-term counterplay." },
+  { group:'Open Games (1.e4 e5)', eco:'C46', name:'Three Knights Game',
+    moves:['e4','e5','Nf3','Nc6','Nc3'],
+    description:"White develops both knights before committing to a pawn structure. Flexible and solid. Often leads to the Four Knights Game when Black responds ...Nf6, or to more independent lines with ...Bc5 or ...g6." },
+  { group:'Open Games (1.e4 e5)', eco:'C47', name:'Four Knights Game',
+    moves:['e4','e5','Nf3','Nc6','Nc3','Nf6'],
+    description:"Symmetrical development of all four knights. Classical and solid. White may enter the Spanish Four Knights (Bb5), Italian Four Knights (Bc4), or the Scotch Four Knights (d4). A rich strategic opening." },
+  { group:'Open Games (1.e4 e5)', eco:'C42', name:'Petrov Defense',
+    moves:['e4','e5','Nf3','Nf6'],
+    description:"Black counters 1.e4 e5 2.Nf3 with 2...Nf6, attacking e4 rather than defending e5. After 3.Nxe5 d6 4.Nf3 Nxe4, Black regains the pawn with equality. Reliable and solid — a favorite of players who want to draw with Black." },
+  { group:'Open Games (1.e4 e5)', eco:'C43', name:"Petrov Defense: Modern Attack",
+    moves:['e4','e5','Nf3','Nf6','d4'],
+    description:"White immediately pushes d4, gaining space and avoiding the symmetrical Petrov endgames. After 3...Nxe4 4.Bd3 d5 5.Nxe5 Nd7, complex middlegame battles arise where both sides have dynamic chances." },
+  { group:'Open Games (1.e4 e5)', eco:'C30', name:"King's Gambit",
+    moves:['e4','e5','f4'],
+    description:"A romantic gambit — White sacrifices a pawn for rapid development and a powerful center. The King's Gambit leads to extremely sharp, double-edged positions. Black must find the right defensive setup or face a devastating attack." },
+  { group:'Open Games (1.e4 e5)', eco:'C33', name:"King's Gambit Accepted",
+    moves:['e4','e5','f4','exf4'],
+    description:"Black grabs the pawn. White plays d4+Nf3 for rapid development and a strong center. Black can try to hold the extra pawn with ...g5 or return it to simplify. Attacking and tactical — White often gets a fierce kingside attack." },
+  { group:'Open Games (1.e4 e5)', eco:'C34', name:"King's Gambit: Fischer Defense",
+    moves:['e4','e5','f4','exf4','Nf3','d6'],
+    description:"Bobby Fischer's recommendation against the King's Gambit. 3...d6 controls e5, prevents Ng5 tricks, and prepares ...g5 to hold the extra pawn. Black aims for a solid structure with an extra pawn." },
+  { group:'Open Games (1.e4 e5)', eco:'C50', name:'Italian Game',
+    moves:['e4','e5','Nf3','Nc6','Bc4'],
+    description:"White develops the bishop to c4 targeting f7. Classical and principled — White often follows with c3+d4 to build a strong center. The Italian Game has experienced a massive revival at the top level due to its rich strategic content." },
+  { group:'Open Games (1.e4 e5)', eco:'C51', name:'Evans Gambit',
+    moves:['e4','e5','Nf3','Nc6','Bc4','Bc5','b4'],
+    description:"A bold 19th-century gambit. White sacrifices a pawn on b4 to gain a tempo and open the b-file for future queenside play. After ...Bxb4 4.c3 Ba5 5.d4, White has a powerful center and active pieces. Aggressive and uncompromising." },
+  { group:'Open Games (1.e4 e5)', eco:'C53', name:'Giuoco Piano',
+    moves:['e4','e5','Nf3','Nc6','Bc4','Bc5','c3'],
+    description:"White prepares d4 with c3. The Giuoco Piano ('Quiet Game') is anything but quiet in modern theory. White aims for d4 to claim the center; Black responds with ...Nf6 and counterplay. Rich middlegame positions arise." },
+  { group:'Open Games (1.e4 e5)', eco:'C54', name:'Giuoco Piano: Classical',
+    moves:['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6','d4'],
+    description:"White executes the d4 break. After ...exd4 5.cxd4 Bb4+ (or 5...Bb6), the game enters the main classical lines. White has a mobile center; Black must generate counterplay. One of the most deeply analyzed systems at the top level." },
+  { group:'Open Games (1.e4 e5)', eco:'C55', name:'Two Knights Defense',
+    moves:['e4','e5','Nf3','Nc6','Bc4','Nf6'],
+    description:"Instead of ...Bc5, Black immediately attacks White's e4 with ...Nf6. After 4.Ng5 d5 5.exd5 Nxd5 6.Nxf7 (Fried Liver), extremely sharp play arises. Also playable is 4.d4 exd4 for equal, active positions." },
+  { group:'Open Games (1.e4 e5)', eco:'C56', name:'Two Knights: Fried Liver Attack',
+    moves:['e4','e5','Nf3','Nc6','Bc4','Nf6','Ng5','d5','exd5','Nxd5','Nxf7'],
+    description:"White sacrifices the knight on f7 for a ferocious attack. After ...Kxf7 8.Qf3+, Black's king is exposed and White has a massive initiative. Only for those who know the theory deeply — or want to surprise an unprepared opponent." },
+  { group:'Open Games (1.e4 e5)', eco:'C60', name:'Ruy Lopez',
+    moves:['e4','e5','Nf3','Nc6','Bb5'],
+    description:"The most classical of all openings, played for centuries. White pins Black's knight, creating indirect pressure on the e5 pawn. The Ruy Lopez offers endlessly deep strategic complexity — it can lead to the Closed, Berlin, Open, Exchange, and many more variations." },
+  { group:'Open Games (1.e4 e5)', eco:'C61', name:'Ruy Lopez: Bird Defense',
+    moves:['e4','e5','Nf3','Nc6','Bb5','Nd4'],
+    description:"An unusual reply: Black plays Nd4 attacking the bishop and f3 knight simultaneously. White retreats Nxd4 or plays c3. Not entirely sound but can create confusion against an unprepared opponent." },
+  { group:'Open Games (1.e4 e5)', eco:'C65', name:'Ruy Lopez: Berlin Defense',
+    moves:['e4','e5','Nf3','Nc6','Bb5','Nf6'],
+    description:"Black attacks e4 with Nf6 instead of defending e5. The Berlin Defense became famous after Kramnik used it to defeat Kasparov in 2000. After 4.O-O Nxe4 5.d4 Nd6 6.Bxc6, the 'Berlin Wall' endgame arises — extremely solid for Black." },
+  { group:'Open Games (1.e4 e5)', eco:'C67', name:'Ruy Lopez: Berlin Endgame',
+    moves:['e4','e5','Nf3','Nc6','Bb5','Nf6','O-O','Nxe4','d4','Nd6','Bxc6','dxc6','dxe5','Nf5'],
+    description:"Queens come off the board very early, leading to a unique endgame. Black's pawn structure is damaged but the position is extremely resilient. White must find a plan in a slightly better endgame — a true test of endgame technique." },
+  { group:'Open Games (1.e4 e5)', eco:'C78', name:'Ruy Lopez: Morphy Defense',
+    moves:['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6'],
+    description:"5...a6 secures the b5 square and forces the bishop to retreat. Black then develops with ...Nf6, ...Be7, and ...O-O. The Closed Ruy Lopez (after 8.O-O Be7 9.Re1) is the main battleground of modern chess theory with enormous amounts of theory." },
+  { group:'Open Games (1.e4 e5)', eco:'C84', name:'Ruy Lopez: Closed',
+    moves:['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7','Re1'],
+    description:"White reinforces e4 with Re1 and prepares the Nc3+d4 or c3+d4 advance. Black must choose a defensive system: Breyer (...Nb8-d7), Chigorin (...Qd8-c7), Zaitsev (...Bb7), or Karpov variations. A lifetime of chess theory awaits." },
+  { group:'Open Games (1.e4 e5)', eco:'C89', name:'Ruy Lopez: Marshall Attack',
+    moves:['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7','Re1','b5','Bb3','O-O','c3','d5'],
+    description:"Black sacrifices a pawn with ...d5! for a powerful initiative. After 16.exd5 Nxd5 17.Nxe5 Nxe5 18.Rxe5, Black gets active piece play and attacking chances. One of the most thoroughly analyzed gambits in chess — highly fashionable at top level." },
+  { group:'Open Games (1.e4 e5)', eco:'C68', name:'Ruy Lopez: Exchange Variation',
+    moves:['e4','e5','Nf3','Nc6','Bb5','a6','Bxc6'],
+    description:"White exchanges the bishop for the knight, giving Black doubled c-pawns. The resulting position is slightly better for White in the endgame due to Black's pawn weakness, but Black has active piece play and the bishop pair." },
+
+  // ═══ Semi-Open Games (1.e4) ══════════════════════════════════════════════
+  { group:'Semi-Open Games (1.e4)', eco:'B20', name:'Sicilian Defense',
+    moves:['e4','c5'],
+    description:"The most popular response to 1.e4. Black fights for central control asymmetrically — c5 controls d4 without mirroring White's pawn on e4. This creates imbalanced positions where Black has genuine winning chances. White typically plays 2.Nf3 and 3.d4 for the Open Sicilian." },
+  { group:'Semi-Open Games (1.e4)', eco:'B22', name:'Sicilian: Alapin Variation',
+    moves:['e4','c5','c3'],
+    description:"White immediately prepares d4 with c3. After 2...Nf6 3.e5 Nd5 4.d4 cxd4 5.cxd4, White gets a strong center. A good surprise weapon that avoids main-line Open Sicilian theory while maintaining pressure." },
+  { group:'Semi-Open Games (1.e4)', eco:'B23', name:'Sicilian: Grand Prix Attack',
+    moves:['e4','c5','Nc3','Nc6','f4'],
+    description:"White launches an immediate kingside attack with f4 before committing the f3 knight. After 5.Nf3, White threatens f4-f5. A practical weapon that bypasses the Open Sicilian — Black must react actively or face a powerful kingside storm." },
+  { group:'Semi-Open Games (1.e4)', eco:'B27', name:'Sicilian: Hyperaccelerated Dragon',
+    moves:['e4','c5','Nf3','g6'],
+    description:"Black fianchettoes immediately without playing ...d6 first. After 3.d4 cxd4 4.Nxd4 Bg7, the position resembles the Dragon but with different move orders. White can avoid the theoretical Dragon with 4.Nc3 or Qxd4." },
+  { group:'Semi-Open Games (1.e4)', eco:'B44', name:'Sicilian: Kan Variation',
+    moves:['e4','c5','Nf3','e6','d4','cxd4','Nxd4','a6'],
+    description:"The 'Hedgehog' system. Black plays a flexible pawn structure (a6, e6, d6, b5) and waits for the right moment to strike. Despite looking passive, the Kan/Hedgehog has rich counterplay potential — the compressed spring principle." },
+  { group:'Semi-Open Games (1.e4)', eco:'B40', name:'Sicilian: English Attack Setup',
+    moves:['e4','c5','Nf3','e6'],
+    description:"Black plays ...e6 before committing to ...d6 or ...d5. This flexible setup can transpose to the Scheveningen, Taimanov, or Kan. White has many systems: the English Attack (Be3, f3, g4), Keres Attack, or Classical." },
+  { group:'Semi-Open Games (1.e4)', eco:'B50', name:'Sicilian: Open Lines after d6',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4'],
+    description:"The Open Sicilian. White opens the center and aims for rapid development and a kingside attack. Black has many choices: 7th move ...Nf6+Nc3 leads to Najdorf, Dragon, Scheveningen, or Classical — each a major opening in its own right." },
+  { group:'Semi-Open Games (1.e4)', eco:'B53', name:'Sicilian: Modern Lines',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3'],
+    description:"The main junction of the Sicilian. After Nc3, Black must commit to a variation: 9...a6 (Najdorf), 9...g6 (Dragon), 9...e6 (Scheveningen), 9...Nc6 (Classical/Sozin). Each leads to fundamentally different pawn structures and plans." },
+  { group:'Semi-Open Games (1.e4)', eco:'B70', name:'Sicilian: Dragon Variation',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','g6'],
+    description:"Black fianchettoes the king's bishop to g7, creating the 'dragon' along the h8-a1 diagonal. The Yugoslav Attack (6.Be3 Bg7 7.f3 O-O 8.Qd2) is White's most aggressive system, leading to opposite-side attacks — whoever gets their attack in first wins." },
+  { group:'Semi-Open Games (1.e4)', eco:'B76', name:'Sicilian Dragon: Yugoslav Attack',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','g6','Be3','Bg7','f3','O-O','Qd2','Nc6','Bc4'],
+    description:"The sharpest line of the Yugoslav Attack. White castles queenside and launches h4-h5-h6 while Black counters with ...Rb8, ...a5-a4. Both sides attack on opposite flanks — whoever gets the first decisive blow wins. One of chess's most violent theoretical battles." },
+  { group:'Semi-Open Games (1.e4)', eco:'B72', name:'Sicilian Dragon: Classical',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','g6','Be3','Bg7','Be2'],
+    description:"White develops classically with Be2 instead of f3. A more positional approach — White aims for kingside castling and a slow buildup. Black has solid Dragon counterplay; the game is more positional than the Yugoslav Attack." },
+  { group:'Semi-Open Games (1.e4)', eco:'B85', name:'Sicilian: Scheveningen',
+    moves:['e4','c5','Nf3','e6','d4','cxd4','Nxd4','Nf6','Nc3','d6'],
+    description:"Black builds a solid pawn structure with e6+d6. The Scheveningen is extremely flexible — Black can castle kingside or queenside and has many active plans. White can play the Keres Attack (f4), English Attack (Be3,f3,g4), or Classical (Be2). Rich and deep." },
+  { group:'Semi-Open Games (1.e4)', eco:'B87', name:'Sicilian Scheveningen: Keres Attack',
+    moves:['e4','c5','Nf3','e6','d4','cxd4','Nxd4','Nf6','Nc3','d6','f4'],
+    description:"White immediately plays f4, threatening f5. The Keres Attack is one of the most dangerous weapons against the Scheveningen. Black must react precisely — ...Nc6, ...a6, or ...Bb4 are possible defenses. Sharp and tactical from the start." },
+  { group:'Semi-Open Games (1.e4)', eco:'B90', name:'Sicilian: Najdorf Variation',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],
+    description:"The most analyzed opening in chess. With 5...a6, Black prevents Bb5+ and prepares ...b5 or ...e5. White has aggressive systems: 6.Bg5 (English Attack), 6.Be3 (English Attack), 6.f3 (Adams Attack), 6.Be2 (Classical). The pinnacle of chess opening theory." },
+  { group:'Semi-Open Games (1.e4)', eco:'B92', name:'Sicilian Najdorf: 6.Be2 (Classical)',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6','Be2'],
+    description:"The Classical Najdorf. White develops harmoniously with Be2 and castles kingside. Less committal than 6.Bg5 or 6.f3. Black has many systems including the Opocensky (e5) and English variations. Strategically complex without immediate tactical explosions." },
+  { group:'Semi-Open Games (1.e4)', eco:'B94', name:'Sicilian Najdorf: 6.Bg5',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6','Bg5'],
+    description:"White pins the f6 knight and prepares f4-f5 or Qd2 with queenside castling. Black's main responses include 6...e6 (Scheveningen hybrid, also leading to the Poisoned Pawn) and 6...Nbd7. One of the sharpest theoretical battles in chess." },
+  { group:'Semi-Open Games (1.e4)', eco:'B96', name:'Sicilian Najdorf: Poisoned Pawn',
+    moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6','Bg5','e6','f4','Qb6'],
+    description:"Black takes the 'poisoned' b2 pawn with Qb6-Qxb2. White gets powerful compensation: lead in development, open lines, and attacking chances. Incredibly sharp and deeply analyzed — a weapon favored by Kasparov and Fischer. Risk versus reward at its most extreme." },
+  { group:'Semi-Open Games (1.e4)', eco:'B32', name:'Sicilian: Löwenthal Variation',
+    moves:['e4','c5','Nf3','Nc6','d4','cxd4','Nxd4','e5'],
+    description:"Black immediately challenges White's d4 knight with ...e5. After 5.Nb5 a6 6.Nd6+ Bxd6 7.Qxd6, White has the bishop pair but Black has strong central control. An active and combative reply." },
+  { group:'Semi-Open Games (1.e4)', eco:'C00', name:'French Defense',
+    moves:['e4','e6'],
+    description:"A solid and principled response to 1.e4. Black prepares ...d5 with ...e6. The French creates a solid pawn structure at the cost of the light-squared bishop on c8. Reliable — a lifetime weapon for those who like strategic complexity. Key plans: ...c5 and ...f6 breaks." },
+  { group:'Semi-Open Games (1.e4)', eco:'C01', name:'French: Exchange Variation',
+    moves:['e4','e6','d4','d5','exd5','exd5'],
+    description:"White exchanges pawns immediately, creating a symmetrical position. Equal and somewhat dry — White is happy to draw with Black from a symmetrical structure. A common choice for players who want to avoid French complexity." },
+  { group:'Semi-Open Games (1.e4)', eco:'C02', name:'French: Advance Variation',
+    moves:['e4','e6','d4','d5','e5'],
+    description:"White gains space with e5. Black attacks the center immediately with ...c5 and develops with ...Nc6, ...Qb6. The Advance French is a fighting opening where Black gets active piece play while White maintains a space advantage. Milner-Barry Gambit (Bd3, c3) is aggressive." },
+  { group:'Semi-Open Games (1.e4)', eco:'C03', name:'French: Tarrasch Variation',
+    moves:['e4','e6','d4','d5','Nd2'],
+    description:"White plays Nd2 instead of Nc3 to avoid the pin after ...Bb4. The Tarrasch leads to an IQP (Isolated Queen's Pawn) structure after ...c5 dxc5. White has dynamic piece activity; Black has a structural target. Rich strategic battles arise." },
+  { group:'Semi-Open Games (1.e4)', eco:'C11', name:'French: Classical with Nf6',
+    moves:['e4','e6','d4','d5','Nc3','Nf6'],
+    description:"Black develops the knight naturally. White plays Bg5 to pin the knight. The Classical French leads to rich strategic battles — White has a space advantage; Black must find the right moment for the ...c5 or ...f6 break. Deep and complex." },
+  { group:'Semi-Open Games (1.e4)', eco:'C12', name:'French: MacCutcheon Variation',
+    moves:['e4','e6','d4','d5','Nc3','Nf6','Bg5','Bb4'],
+    description:"Black pins the c3 knight with Bb4, similar to the Nimzo-Indian. After 5.e5 h6 6.exf6 hxg5 7.fxg7 Rg8, very sharp play arises. Black weakens the kingside but gets active counterplay. A combative variation with imbalanced positions." },
+  { group:'Semi-Open Games (1.e4)', eco:'C17', name:'French: Winawer Variation',
+    moves:['e4','e6','d4','d5','Nc3','Bb4'],
+    description:"Black pins the c3 knight immediately. After 5.e5 c5 6.a3 Bxc3+ 7.bxc3, White has doubled pawns but a powerful center with the e5 pawn. Black's attack on the queenside battles White's kingside play. One of the most theoretically dense openings in chess." },
+  { group:'Semi-Open Games (1.e4)', eco:'C18', name:'French: Winawer, Advance',
+    moves:['e4','e6','d4','d5','Nc3','Bb4','e5'],
+    description:"White advances immediately. After 6.a3 Bxc3+ 7.bxc3, White has a powerful center at the cost of pawn structure. Black plays ...Qc7, ...Ne7-Nf5 and queenside counterplay with ...c5-c4. Extremely rich strategically — both sides have specific plans." },
+  { group:'Semi-Open Games (1.e4)', eco:'B10', name:'Caro-Kann Defense',
+    moves:['e4','c6'],
+    description:"Black prepares ...d5 with c6, maintaining the option to recapture on d5 with the c-pawn. The Caro-Kann avoids the 'bad bishop' problem of the French. Solid, principled, and reliable — favored by Karpov, Petrosian, and many world champions." },
+  { group:'Semi-Open Games (1.e4)', eco:'B12', name:'Caro-Kann: Advance Variation',
+    moves:['e4','c6','d4','d5','e5'],
+    description:"White claims a space advantage with e5. Black plays ...Bf5 before ...e6 to develop the bishop actively. Main plans: Short variation (Be3, Nd2, c3, f3) and Tal variation (Ng5 or Nf3 attacking the bishop). Sharp and combative." },
+  { group:'Semi-Open Games (1.e4)', eco:'B13', name:'Caro-Kann: Exchange',
+    moves:['e4','c6','d4','d5','exd5','cxd5'],
+    description:"White exchanges on d5, leading to a symmetrical pawn structure. Black has no bishop problem — both bishops are active. The Exchange Caro-Kann is solid and equal, often leading to quiet positional play." },
+  { group:'Semi-Open Games (1.e4)', eco:'B14', name:'Caro-Kann: Panov-Botvinnik Attack',
+    moves:['e4','c6','d4','d5','exd5','cxd5','c4'],
+    description:"White immediately attacks the isolated d5 pawn with c4. After ...Nf6 4.Nc3, an IQP (Isolated Queen's Pawn) position arises. White has active piece play and kingside attack potential; Black's IQP is a long-term weakness." },
+  { group:'Semi-Open Games (1.e4)', eco:'B18', name:'Caro-Kann: Classical',
+    moves:['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],
+    description:"Black develops the light-squared bishop to f5 — the cleanest and most principled. After 5.Ng3 Bg6 6.h4 h6 7.Nf3 Nd7, the main Classical Caro-Kann begins. Black has a solid position with active pieces; White seeks to exploit the c5 square." },
+  { group:'Semi-Open Games (1.e4)', eco:'B07', name:'Pirc Defense',
+    moves:['e4','d6','d4','Nf6','Nc3','g6'],
+    description:"Black fianchettoes the king's bishop and allows White to build a large center. Hypermodern — Black plans to undermine the center with ...c5 or ...e5 counterattacks. The Austrian Attack (f4) and Classical (Nf3, Be2) are White's main systems." },
+  { group:'Semi-Open Games (1.e4)', eco:'B09', name:'Pirc: Austrian Attack',
+    moves:['e4','d6','d4','Nf6','Nc3','g6','f4'],
+    description:"White plays f4 for space and attacking intentions. After ...Bg7 5.Nf3 O-O 6.e5!, the game becomes very sharp. Black must react with ...dxe5 or ...c5 to create counterplay, or face a dangerous kingside attack." },
+  { group:'Semi-Open Games (1.e4)', eco:'B06', name:'Modern Defense',
+    moves:['e4','g6','d4','Bg7'],
+    description:"Black fianchettoes immediately before playing ...d6. Extremely flexible — Black invites White to build any center and plans to counterattack it. The Modern can transpose to the Pirc, King's Indian, or its own independent systems." },
+  { group:'Semi-Open Games (1.e4)', eco:'C40', name:'Latvian Gambit',
+    moves:['e4','e5','Nf3','f5'],
+    description:"Black sacrifices a pawn for active play and tactical complications. After 3.Nxe5 Qf6 4.d4 d6, Black gets active piece play but is objectively worse. A dangerous surprise weapon at the club level." },
+
+  // ═══ Closed Games (1.d4) ═════════════════════════════════════════════════
+  { group:'Closed Games (1.d4)', eco:'D06', name:"Queen's Gambit",
+    moves:['d4','d5','c4'],
+    description:"White offers a pawn to gain central control. The Queen's Gambit is one of the oldest and most respected openings. If Black accepts (QGA), White gets active development; if declined (QGD), complex strategic battles arise." },
+  { group:'Closed Games (1.d4)', eco:'D20', name:"Queen's Gambit Accepted",
+    moves:['d4','d5','c4','dxc4'],
+    description:"Black takes the pawn but must give it back. White plays e3 and Bxc4 for rapid development. Black equalizes with ...c5 or ...e5 breaks. The QGA leads to open, dynamic positions where Black needs active play to compensate for returning the pawn." },
+  { group:'Closed Games (1.d4)', eco:'D23', name:"QGA: Classical Variation",
+    moves:['d4','d5','c4','dxc4','Nf3','Nf6'],
+    description:"The Classical QGA. White plays e3 and Bxc4, getting rapid development. Black develops with ...e6, ...c5, ...Nc6 plans. Rich strategic play with open lines. White has a development advantage that must be converted before Black consolidates." },
+  { group:'Closed Games (1.d4)', eco:'D10', name:'Slav Defense',
+    moves:['d4','d5','c4','c6'],
+    description:"Black supports d5 with c6 while keeping options for the dark-squared bishop (unlike the QGD). The Slav is solid and flexible — one of the most reliable responses to the Queen's Gambit. The c8 bishop can develop to f5 or g4 before ...e6." },
+  { group:'Closed Games (1.d4)', eco:'D11', name:'Slav Defense: 3.Nf3',
+    moves:['d4','d5','c4','c6','Nf3','Nf6'],
+    description:"Both sides develop naturally. White can enter the Exchange Slav, Meran, Anti-Meran, or other systems. The Slav is Black's most popular response to the QGD complex — solid, principled, and theoretically rich." },
+  { group:'Closed Games (1.d4)', eco:'D18', name:'Slav Defense: Classical',
+    moves:['d4','d5','c4','c6','Nc3','Nf6','Nf3','dxc4','a4','Bf5'],
+    description:"Black takes the pawn and develops the bishop to f5 before playing ...e6. After 6.e3 e6 7.Bxc4 Bb4, the Classical Slav arises. Rich tactical and strategic possibilities — Black has the active bishop but a slightly backward development." },
+  { group:'Closed Games (1.d4)', eco:'D43', name:'Semi-Slav Defense',
+    moves:['d4','d5','c4','e6','Nc3','Nf6','Nf3','c6'],
+    description:"Black combines c6+e6, creating a solid pawn structure. The Meran and Anti-Meran (Moscow, Anti-Moscow) variations are deeply analyzed. One of the most theoretically complex opening systems at the top level — a battleground for decades." },
+  { group:'Closed Games (1.d4)', eco:'D44', name:'Semi-Slav: Anti-Meran / Moscow',
+    moves:['d4','d5','c4','e6','Nc3','Nf6','Nf3','c6','Bg5'],
+    description:"White pins the f6 knight immediately. After 8...h6 9.Bxf6 (Anti-Moscow) or 8...dxc4 (Botvinnik), extremely sharp positions arise. The Anti-Meran complex is one of the most theoretically challenging areas in modern chess." },
+  { group:'Closed Games (1.d4)', eco:'D45', name:'Semi-Slav: Meran Variation',
+    moves:['d4','d5','c4','e6','Nc3','Nf6','Nf3','c6','e3'],
+    description:"White plays e3 quietly. After 8...dxc4 9.Bxc4 b5 10.Bb3 a6, the Meran arises. Black gets active queenside play; White aims for a kingside attack. Extremely complex theory with many sharp tactical lines at the highest level." },
+  { group:'Closed Games (1.d4)', eco:'D30', name:"Queen's Gambit Declined",
+    moves:['d4','d5','c4','e6'],
+    description:"Black declines the gambit, reinforcing d5 with ...e6. Solid and reliable — one of the most popular defenses. Black's main problem is the c8 bishop, often called the 'bad bishop.' Plans center around ...dxc4 or ...c5 breaks to free it." },
+  { group:'Closed Games (1.d4)', eco:'D35', name:"QGD: Exchange Variation",
+    moves:['d4','d5','c4','e6','Nc3','Nf6','cxd5','exd5'],
+    description:"White exchanges pawns, creating a symmetrical structure. White executes the Minority Attack (b4-b5xc6) to weaken Black's queenside pawns. A strategic, endgame-oriented approach — Black must be accurate to neutralize the positional pressure." },
+  { group:'Closed Games (1.d4)', eco:'D37', name:"QGD: Classical Variation",
+    moves:['d4','d5','c4','e6','Nc3','Nf6','Nf3','Be7'],
+    description:"The most classical QGD setup. Black develops harmoniously. White plans e3 or Bg5+e3. The resulting IQP positions (after ...dxc4 or ...c5 dxc5) give White active piece play; Black has a structural advantage. One of chess's most analyzed positions." },
+  { group:'Closed Games (1.d4)', eco:'D40', name:"QGD: Semi-Tarrasch",
+    moves:['d4','d5','c4','e6','Nc3','Nf6','Nf3','c5'],
+    description:"Black immediately counterattacks in the center with ...c5. After 7.cxd5 Nxd5 8.e4, White gets central play; after 7.e3 cxd4 8.exd4, an IQP position arises. The Semi-Tarrasch is dynamic and active for Black." },
+  { group:'Closed Games (1.d4)', eco:'E20', name:'Nimzo-Indian Defense',
+    moves:['d4','Nf6','c4','e6','Nc3','Bb4'],
+    description:"Black pins the c3 knight, preventing a powerful center. After 4.Qc2 (Classical), 4.e3 (Rubinstein), or 4.a3 (Sämisch), complex strategic battles arise. The Nimzo-Indian gives Black excellent counterplay and the bishop pair after ...Bxc3." },
+  { group:'Closed Games (1.d4)', eco:'E21', name:'Nimzo-Indian: Spielmann Variation',
+    moves:['d4','Nf6','c4','e6','Nc3','Bb4','Qb3'],
+    description:"White plays Qb3 to attack the b4 bishop and threaten Bxf7+? ideas. After ...Nc6, the game becomes sharp. An interesting sideline that avoids the main Qc2 lines — White gets early queen activity but wastes time." },
+  { group:'Closed Games (1.d4)', eco:'E32', name:'Nimzo-Indian: Classical (Qc2)',
+    moves:['d4','Nf6','c4','e6','Nc3','Bb4','Qc2'],
+    description:"The most popular system against the Nimzo-Indian. Qc2 avoids doubled pawns after ...Bxc3. After ...O-O 5.a3 Bxc3+ 6.Qxc3, White has the bishop pair but Black gets active play with ...d5, ...c5. Deep strategic battles arise." },
+  { group:'Closed Games (1.d4)', eco:'E43', name:'Nimzo-Indian: Fischer Variation',
+    moves:['d4','Nf6','c4','e6','Nc3','Bb4','e3','b6'],
+    description:"Black prepares ...Ba6 to trade the a6 bishop for White's d3 bishop. After 8.Bd3 Ba6 9.Bxa6 Nxa6, Black gets the bishop pair eliminated and an equal structure. Fischer used this approach as a way to achieve quick equality." },
+  { group:'Closed Games (1.d4)', eco:'E46', name:'Nimzo-Indian: Rubinstein Variation',
+    moves:['d4','Nf6','c4','e6','Nc3','Bb4','e3','O-O'],
+    description:"Black castles immediately. After 5.Nge2 d5 6.a3 Bd6, or 5.Bd3 d5 6.Nf3, the Rubinstein system arises. Solid and flexible — Black achieves good development while maintaining the pin on the c3 knight." },
+  { group:'Closed Games (1.d4)', eco:'E12', name:"Queen's Indian Defense",
+    moves:['d4','Nf6','c4','e6','Nf3','b6'],
+    description:"Black fianchettoes the queen's bishop to fight for the long diagonal and control e4. Key plan: ...Ba6 to trade White's d3 bishop. Very solid and hypermodern — Black avoids Nc3 and the Nimzo pin while maintaining flexibility in the center." },
+  { group:'Closed Games (1.d4)', eco:'E15', name:"Queen's Indian: Classical",
+    moves:['d4','Nf6','c4','e6','Nf3','b6','g3','Bb7','Bg2','Be7','O-O','O-O'],
+    description:"Both sides fianchetto and castle kingside. White's Bg2 fights for the long diagonal against Black's Bb7. Rich strategic battles along the e4 and d5 squares. Black has a flexible setup with many plans — ...c5, ...d5, or ...Ne4." },
+  { group:'Closed Games (1.d4)', eco:'E60', name:"King's Indian Defense",
+    moves:['d4','Nf6','c4','g6','Nc3','Bg7'],
+    description:"Black fianchettoes the king's bishop and allows White to build a large center. One of the most dynamic defenses in chess. Key plans: ...d6+...e5 (Mar del Plata), ...d6+...c5 (Modern Benoni style), or ...d5 (Grünfeld-like). Extremely rich and complex." },
+  { group:'Closed Games (1.d4)', eco:'E70', name:"King's Indian: Classical Setup",
+    moves:['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6','Nf3'],
+    description:"White builds a massive center with d4+e4 and develops harmoniously. After 5...O-O, Black can enter the Classical (6.Be2), Sämisch (6.f3), Four Pawns (6.f4), or Averbakh (6.Bg5) variations — each a major opening system." },
+  { group:'Closed Games (1.d4)', eco:'E80', name:"King's Indian: Sämisch Variation",
+    moves:['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6','f3'],
+    description:"The most aggressive system against the KID. f3 prevents ...Ng4 and prepares Be3, Qd2, g4-g5. White wants to attack on the queenside or kingside. Black must counterattack immediately with ...e5 or ...c5 or face a positional squeeze." },
+  { group:'Closed Games (1.d4)', eco:'E92', name:"King's Indian: Classical Variation",
+    moves:['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6','Nf3','O-O','Be2'],
+    description:"The main Classical KID. After ...e5 8.O-O Nc6 9.d5 Ne7, the 'Mar del Plata' position arises. White plays c5 or b4 for queenside expansion; Black plays f5-f4 for a kingside attack. One of chess's most exciting battles of mutual attacks." },
+  { group:'Closed Games (1.d4)', eco:'E97', name:"King's Indian: Mar del Plata",
+    moves:['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6','Nf3','O-O','Be2','e5','O-O','Nc6','d5','Ne7'],
+    description:"The signature position of the King's Indian Defense. The center is closed — White attacks on the queenside with b4-b5-c5; Black attacks on the kingside with f5-f4-g5-h5. The most dynamic and combative positions in all of chess theory." },
+  { group:'Closed Games (1.d4)', eco:'E62', name:"King's Indian: Fianchetto",
+    moves:['d4','Nf6','c4','g6','Nc3','Bg7','Nf3','O-O','g3'],
+    description:"White also fianchettoes the king's bishop. The dual fianchetto system is solid and flexible — White avoids sharp King's Indian theory while maintaining a small but persistent advantage. Black can play ...d5 (transpose to Grünfeld-like) or ...d6." },
+  { group:'Closed Games (1.d4)', eco:'D80', name:'Grünfeld Defense',
+    moves:['d4','Nf6','c4','g6','Nc3','d5'],
+    description:"Black allows White to build a huge center and immediately attacks it. After 4.cxd5 Nxd5 5.e4 Nxc3 6.bxc3 Bg7, Black has the powerful g7 bishop aimed at White's center. A hypermodern masterpiece — White's center must be maintained or it collapses." },
+  { group:'Closed Games (1.d4)', eco:'D85', name:'Grünfeld Defense: Exchange',
+    moves:['d4','Nf6','c4','g6','Nc3','d5','cxd5','Nxd5','e4','Nxc3','bxc3','Bg7'],
+    description:"White accepts the exchange and builds a massive center. After ...c5, Black immediately challenges. The resulting position is razor-sharp — White has d4+e4+c3 as a pawn mass; Black's Bg7 bombards White's center. Both sides have rich attacking chances." },
+  { group:'Closed Games (1.d4)', eco:'D97', name:'Grünfeld Defense: Russian System',
+    moves:['d4','Nf6','c4','g6','Nc3','d5','Nf3','Bg7','Qb3'],
+    description:"White attacks d5 and b7 simultaneously with Qb3. After ...dxc4 9.Qxc4 O-O, White has an active queen and pressure on the queenside. One of the most popular systems against the Grünfeld — tested at the highest level for decades." },
+  { group:'Closed Games (1.d4)', eco:'D90', name:'Grünfeld: Hungarian/Closed',
+    moves:['d4','Nf6','c4','g6','Nc3','d5','Nf3','Bg7','Bg5'],
+    description:"White pins the f6 knight with Bg5. This unusual system avoids the main Grünfeld theory and often leads to quieter, more positional play. Black must be careful not to lose the d5 pawn immediately." },
+  { group:'Closed Games (1.d4)', eco:'A80', name:'Dutch Defense',
+    moves:['d4','f5'],
+    description:"Black plays f5 to control e4, creating an asymmetrical pawn structure from the start. Three main systems: Stonewall (d5+e6+c6), Classical (d6+e5), and Leningrad (g6+Nf6+d6+Bg7). Each has different strategic goals — the Dutch is fighting and complex." },
+  { group:'Closed Games (1.d4)', eco:'A83', name:'Dutch Defense: Stonewall',
+    moves:['d4','f5','c4','e6','Nf3','Nf6','g3','d5'],
+    description:"Black creates a solid 'Stonewall' with d5+e6+f5+c6. Black firmly controls e4 but leaves the e5 square very weak. White attacks with Nc3, Ne5 and the e5 outpost. A positional battle between Black's e4 control and White's e5 outpost." },
+  { group:'Closed Games (1.d4)', eco:'A87', name:'Dutch Defense: Leningrad',
+    moves:['d4','f5','c4','Nf6','g3','g6'],
+    description:"Black combines f5 with a fianchetto, creating a flexible setup. After ...Bg7 and ...d6+...O-O, Black has strong kingside play. White typically seeks the e4 break at the right moment to challenge Black's center. Dynamic and double-edged." },
+  { group:'Closed Games (1.d4)', eco:'D02', name:'London System',
+    moves:['d4','d5','Nf3','Nf6','Bf4'],
+    description:"White develops the bishop to f4 before playing e3. The London is solid and reliable — White gets a stable setup regardless of Black's response. The bishop on f4 is securely placed. Increasingly popular at all levels as a low-theory, solid choice." },
+  { group:'Closed Games (1.d4)', eco:'D01', name:'London System: vs KID setup',
+    moves:['d4','Nf6','Nf3','g6','Bf4'],
+    description:"White plays the London move order against Black's fianchetto setup. After ...Bg7, the game can become a King's Indian-like structure where White has the bishop actively placed on f4. Solid and practical." },
+  { group:'Closed Games (1.d4)', eco:'E00', name:'Catalan Opening',
+    moves:['d4','Nf6','c4','e6','g3'],
+    description:"White combines the Queen's Gambit with a fianchetto. The Bg2 exerts long-term pressure along the a8-h1 diagonal. In the Open Catalan (5...dxc4), White gets the diagonal; in the Closed, White builds slowly. Very effective at the top level — White often gets a nagging endgame edge." },
+  { group:'Closed Games (1.d4)', eco:'E06', name:'Catalan Opening: Open',
+    moves:['d4','Nf6','c4','e6','g3','d5','Nf3','Be7','Bg2','O-O','O-O','dxc4'],
+    description:"Black takes the c4 pawn, opening the long diagonal for White's bishop. After 7.Qc2 and regaining the pawn, White has long-term positional pressure. Black is solid but must be accurate — the Bg2 creates persistent problems throughout the game." },
+  { group:'Closed Games (1.d4)', eco:'D00', name:"Queen's Pawn: Blackmar-Diemer Gambit",
+    moves:['d4','d5','e4'],
+    description:"White sacrifices a pawn for rapid development. After 3...dxe4 4.Nc3 Nf6 5.f3 exf3 6.Nxf3, White has active pieces and attacking chances. Black can decline with 3...e6 or 3...c6. A dangerous gambit at the club level." },
+
+  // ═══ Flank Openings ══════════════════════════════════════════════════════
+  { group:'Flank Openings', eco:'A20', name:'English Opening',
+    moves:['c4'],
+    description:"A flexible hypermodern opening. White controls d5 with c4 and keeps maximum flexibility. The English can become a Sicilian reversed (with an extra tempo), King's Indian reversed, or enter independent territory. Used by virtually every world champion." },
+  { group:'Flank Openings', eco:'A21', name:'English: 1...e5',
+    moves:['c4','e5'],
+    description:"Black occupies e5, playing the 'Reversed Sicilian' with an extra tempo for White. After 2.Nc3 Nf6 3.g3, White fianchettoes for pressure on the long diagonal. Dynamic and rich — Black has the reversed Sicilian structure but White has an extra tempo." },
+  { group:'Flank Openings', eco:'A22', name:'English: King\'s English',
+    moves:['c4','e5','Nc3','Nf6'],
+    description:"Black develops actively. After 3.Nf3 Nc6 or 3.g3 d5, rich strategic battles arise. White can transpose to Four Knights structures or develop the king's bishop to g2 for long-term pressure. Very flexible and strategic." },
+  { group:'Flank Openings', eco:'A25', name:'English: Closed',
+    moves:['c4','e5','Nc3','Nc6','g3'],
+    description:"White fianchettoes and plans a slow buildup. After ...g6 4.Bg2 Bg7 5.e3, a complex positional game arises. White controls the long diagonal; Black has a solid pawn structure. Strategic and positional — a favorite of Karpov." },
+  { group:'Flank Openings', eco:'A30', name:'English: Symmetrical',
+    moves:['c4','c5','Nf3','Nf6'],
+    description:"Black mirrors White's setup. After 3.Nc3 Nc6 4.g3 g6, the symmetrical English leads to rich positional battles. The question is who can break the symmetry favorably. White goes first, so White has a slight initiative to work with." },
+  { group:'Flank Openings', eco:'A04', name:'Reti Opening',
+    moves:['Nf3'],
+    description:"A hypermodern opening — White influences the center with pieces rather than pawns. After 1...d5 2.c4, the game enters Reti territory. White keeps flexibility and can transpose to many openings. Used by Reti to defeat Capablanca in 1924." },
+  { group:'Flank Openings', eco:'A07', name:'Reti: King\'s Indian Attack',
+    moves:['Nf3','d5','g3'],
+    description:"White plays the King's Indian Attack setup regardless of Black's response. After 3.Bg2 4.O-O 5.d3 6.Nbd2, White gets a flexible attacking setup that works against many Black systems. Fischer and Karpov both used this system effectively." },
+  { group:'Flank Openings', eco:'A05', name:'Reti Opening: Symmetrical',
+    moves:['Nf3','Nf6'],
+    description:"Both sides develop the king's knight first. Extremely flexible — the game can transpose to many different openings. White typically follows with g3, Bg2, O-O for the fianchetto system or c4 for the English." },
+  { group:'Flank Openings', eco:'A45', name:'Trompowsky Attack',
+    moves:['d4','Nf6','Bg5'],
+    description:"White immediately pins Black's knight, avoiding main-line d4 theory. After 2...Ne4 3.Bf4 or 2...e6 3.e4, the game enters independent Trompowsky territory. A popular surprise weapon — effective at all levels for avoiding theoretical battles." },
+  { group:'Flank Openings', eco:'A46', name:'Torre Attack',
+    moves:['d4','Nf6','Nf3','e6','Bg5'],
+    description:"White pins the knight and develops solidly. After ...Be7, White plays Nbd2, e3, c3 for a solid London-like setup. The Torre Attack is reliable and solid — a practical weapon that avoids sharp opening theory." },
+  { group:'Flank Openings', eco:'A47', name:'Queen\'s Indian: Nimzowitsch-Larsen',
+    moves:['d4','Nf6','Nf3','b6'],
+    description:"Black immediately fianchettoes the queen's bishop. An independent system — Black gets the Bb7 pointing at White's e4 square. If White doesn't establish e4, Black has an easy game. White typically plays c4 to transpose to Queen's Indian theory." },
+  { group:'Flank Openings', eco:'A01', name:'Nimzowitsch-Larsen Attack',
+    moves:['b3'],
+    description:"White fianchettoes the queen's bishop for long-range pressure on the center. After Bb2, White controls the long diagonal and prepares e4 or c4. Hypermodern and flexible — effective as a surprise weapon at all levels." },
+  { group:'Flank Openings', eco:'A00', name:'Bird\'s Opening',
+    moves:['f4'],
+    description:"White plays f4, controlling e5 and preparing a kingside attack. After ...d5 2.Nf3, the Bird's Opening leads to the Leningrad Dutch structure with colors reversed. From the Stonewall Bird (with d4, e3, c3, Bd3) to the aggressive ...e5 counter (From's Gambit), the Bird is rich and underrated." },
+  { group:'Flank Openings', eco:'A00', name:'Polish Opening',
+    moves:['b4'],
+    description:"The Orang-Utan Opening. White advances the b-pawn to b4, planning Bb2 for long diagonal pressure. After ...e5 2.Bb2 f6 or ...d5 2.Bb2, unconventional positions arise. A surprise weapon — White sacrifices center control for piece activity." },
 ];
+
+// ── FEN position → opening lookup table ───────────────────────────────────
+// Built from ECO_BOOK at startup; deepest-match (most moves) wins for each FEN.
+const FEN_MAP = new Map();
+(function buildFenMap() {
+  const tmp = new Chess();
+  for (const entry of ECO_BOOK) {
+    tmp.reset();
+    for (let i = 0; i < entry.moves.length; i++) {
+      if (!tmp.move(entry.moves[i])) break;
+      const key = tmp.fen().split(' ').slice(0, 4).join(' ');
+      const existing = FEN_MAP.get(key);
+      if (!existing || i + 1 >= existing.depth) {
+        FEN_MAP.set(key, {
+          eco:  entry.eco,
+          name: entry.name,
+          description: entry.description || '',
+          depth: i + 1,
+          idx:  ECO_BOOK.indexOf(entry),
+        });
+      }
+    }
+  }
+})();
 
 // ── Stockfish workers ──────────────────────────────────────────────────────
 function mkWorker() {
@@ -887,6 +1242,8 @@ function setPlayMode(pm) {
   document.getElementById('tcRow').style.display          = pm === 'challenge' ? '' : 'none';
   document.getElementById('takeBackBtn').style.display    = pm !== 'challenge' ? '' : 'none';
   document.getElementById('hintRow').style.display        = pm !== 'challenge' ? '' : 'none';
+  if (pm !== 'analysis') document.getElementById('openingInfoPanel').classList.remove('visible');
+  if (pm === 'challenge') document.getElementById('autoOpeningBar').textContent = '';
   newGame();
 }
 
@@ -1035,7 +1392,7 @@ function goToMove(idx) {
   hintArrow = null;
   viewIdx = Math.max(0, Math.min(idx, getHistory().length));
   selected = null; legalMoves = null;
-  renderBoard(); updateMoveList();
+  renderBoard(); updateMoveList(); updateAutoOpening();
   const vg = getViewGame();
   scheduleEval(vg.fen(), vg.turn());
 }
@@ -1206,7 +1563,7 @@ function doMove(from, to, promotion = 'q') {
   selected = null; legalMoves = null;
   // Lock mode + difficulty the moment the first move is played
   if (game.history().length === 1 && currentMode === 'vs-computer') lockSettings();
-  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
+  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus(); updateAutoOpening();
   scheduleEval(game.fen(), game.turn());
 
   if (currentMode === 'multiplayer') {
@@ -1276,7 +1633,7 @@ function takeBack() {
   clockStop();
   viewIdx = game.history().length;
   selected = null; legalMoves = null;
-  renderBoard(); updateStatus(); updateMoveList();
+  renderBoard(); updateStatus(); updateMoveList(); updateAutoOpening();
 }
 
 // ── AI engine ─────────────────────────────────────────────────────────────
@@ -1319,7 +1676,7 @@ function setOpening(val) {
     openingPositions = [];
   } else {
     const idx = parseInt(val);
-    selectedOpening = OPENINGS[idx] || null;
+    selectedOpening = ECO_BOOK[idx] || null;
     openingPositions = [];
     if (selectedOpening) {
       const tmp = new Chess();
@@ -1453,7 +1810,6 @@ function updateOpeningStatus() {
   if (!el) return;
   if (!selectedOpening) { el.textContent = ''; return; }
 
-  const h   = game.history().length;
   const idx = getOpeningIdx();
 
   if (idx < 0) {
@@ -1466,6 +1822,48 @@ function updateOpeningStatus() {
     const moveNum = Math.floor(idx / 2) + 1;
     el.textContent = `📖 ${selectedOpening.name} — move ${moveNum}`;
     el.style.color = '#a5b4fc';
+  }
+}
+
+function detectOpening(fen) {
+  const key = fen.split(' ').slice(0, 4).join(' ');
+  return FEN_MAP.get(key) || null;
+}
+
+function updateAutoOpening() {
+  const bar   = document.getElementById('autoOpeningBar');
+  const panel = document.getElementById('openingInfoPanel');
+  if (!bar || !panel) return;
+
+  // Only show in vs-computer casual or analysis
+  if (currentMode !== 'vs-computer' || playMode === 'challenge') {
+    bar.textContent = '';
+    panel.classList.remove('visible');
+    return;
+  }
+
+  const vg       = getViewGame();
+  const detected = detectOpening(vg.fen());
+
+  if (detected) {
+    bar.textContent = `📖 ${detected.eco} — ${detected.name}`;
+    bar.style.color = '#a5b4fc';
+
+    if (playMode === 'analysis' && detected.description) {
+      document.getElementById('openingInfoName').textContent = detected.name;
+      document.getElementById('openingInfoEco').textContent  = `ECO: ${detected.eco}`;
+      document.getElementById('openingInfoDesc').textContent = detected.description;
+      panel.classList.add('visible');
+    } else {
+      panel.classList.remove('visible');
+    }
+  } else {
+    if (game.history().length > 0 || getHistory().length > 0) {
+      bar.textContent = '';
+    } else {
+      bar.textContent = '';
+    }
+    panel.classList.remove('visible');
   }
 }
 
@@ -1587,7 +1985,7 @@ function newGame() {
   }
   document.getElementById('moveList').innerHTML = '';
   resetEvalBar();
-  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
+  renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus(); updateAutoOpening();
 }
 
 function applyEloUpdate(eloChange, newElo) {
@@ -1837,7 +2235,7 @@ document.getElementById('openingSelect').addEventListener('change', function() {
   (function() {
     const sel = document.getElementById('openingSelect');
     const groups = {};
-    OPENINGS.forEach((o, i) => {
+    ECO_BOOK.forEach((o, i) => {
       if (!groups[o.group]) groups[o.group] = [];
       groups[o.group].push({ idx: i, name: o.name, eco: o.eco });
     });
