@@ -730,6 +730,11 @@ let mpDrawOffered = false;
 let selectedOpening  = null;
 let openingPositions = [];  // FEN after each half-move (index 0 = start position)
 
+// board annotations (right-click arrows & square highlights)
+let annotations       = [];   // [{ type:'arrow'|'circle', from?, to?, sq?, color }]
+let annotatingFrom    = null; // square where right-mousedown started
+let previewAnnotation = null; // in-flight annotation while right-dragging
+
 // eval bar
 let evalW     = null;   // dedicated eval Stockfish worker (never used for moves)
 let evalReady = false;
@@ -938,11 +943,7 @@ function renderBoard() {
 
   updateNavBtns();
 
-  // Opening hint arrow (only at live position, vs-computer, non-analysis)
-  if (atLivePos() && currentMode === 'vs-computer' && playMode !== 'analysis') {
-    const hint = getHintArrow();
-    if (hint) renderOpeningArrow(hint.from, hint.to);
-  }
+  renderAnnotationLayer();
 }
 
 function updateStatus() {
@@ -1037,6 +1038,9 @@ async function copyPgn() {
   }
 }
 
+// Suppress the browser context menu over the board so right-click can draw arrows
+document.getElementById('board').addEventListener('contextmenu', e => e.preventDefault());
+
 // ── Drag & drop ────────────────────────────────────────────────────────────
 function canInteract() {
   if (game.isGameOver()) return false;
@@ -1054,7 +1058,15 @@ function canInteract() {
 }
 
 function onSqDown(sq, e) {
-  if (!canInteract() || e.button !== 0) return;
+  // Right-click: begin annotation drag
+  if (e.button === 2) { e.preventDefault(); annotatingFrom = sq; return; }
+  if (e.button !== 0) return;
+
+  // Left-click: clear any drawn annotations
+  const hadAnns = annotations.length > 0;
+  annotations = [];
+  if (!canInteract()) { if (hadAnns) renderAnnotationLayer(); return; }
+
   const vg = getViewGame();
 
   // Complete a pending click-to-move
@@ -1093,8 +1105,37 @@ function posGhost(e) {
   dragState.ghost.style.top  = e.clientY + 'px';
 }
 
-document.addEventListener('mousemove', e => { if (dragState) posGhost(e); });
+document.addEventListener('mousemove', e => {
+  if (dragState) { posGhost(e); return; }
+  if (!annotatingFrom) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const sq = el?.closest('[data-sq]')?.dataset.sq;
+  previewAnnotation = (sq && sq !== annotatingFrom)
+    ? { type:'arrow',  from:annotatingFrom, to:sq,          color:getAnnotationColor(e) }
+    : (sq ? { type:'circle', sq:annotatingFrom,             color:getAnnotationColor(e) } : null);
+  renderAnnotationLayer();
+});
+
 document.addEventListener('mouseup', e => {
+  // Finalise right-click annotation
+  if (e.button === 2) {
+    previewAnnotation = null;
+    if (annotatingFrom) {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const sq = el?.closest('[data-sq]')?.dataset.sq;
+      if (sq) {
+        if (sq !== annotatingFrom)
+          toggleAnnotation({ type:'arrow',  from:annotatingFrom, to:sq, color:getAnnotationColor(e) });
+        else
+          toggleAnnotation({ type:'circle', sq,                         color:getAnnotationColor(e) });
+      }
+      annotatingFrom = null;
+      renderAnnotationLayer();
+    }
+    return;
+  }
+
+  // Left-button drag-drop move
   if (!dragState) return;
   const { fromSq, ghost } = dragState;
   dragState = null;
@@ -1255,16 +1296,28 @@ function getHintArrow() {
   return m ? { from: m.from, to: m.to } : null;
 }
 
-function renderOpeningArrow(from, to) {
+function getAnnotationColor(e) {
+  if (e.shiftKey)             return 'rgba(255,200,0,0.9)';
+  if (e.ctrlKey || e.metaKey) return 'rgba(220,55,55,0.9)';
+  return 'rgba(50,210,80,0.88)';
+}
+
+function toggleAnnotation(ann) {
+  const same = a =>
+    a.type === ann.type &&
+    (a.type === 'circle' ? a.sq === ann.sq : a.from === ann.from && a.to === ann.to);
+  const idx = annotations.findIndex(same);
+  if (idx >= 0) annotations.splice(idx, 1);
+  else annotations.push(ann);
+}
+
+function renderAnnotationLayer() {
   const boardEl = document.getElementById('board');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible;';
+  document.getElementById('annotSvg')?.remove();
 
   const size = boardEl.offsetWidth || 504;
-  svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
-
-  const flip  = currentMode === 'multiplayer' && mpColor === 'b';
-  const sqSz  = size / 8;
+  const flip = currentMode === 'multiplayer' && mpColor === 'b';
+  const sqSz = size / 8;
 
   function sqCenter(sq) {
     const file = sq.charCodeAt(0) - 97;
@@ -1275,29 +1328,54 @@ function renderOpeningArrow(from, to) {
     };
   }
 
-  const f  = sqCenter(from);
-  const t  = sqCenter(to);
-  const dx = t.x - f.x, dy = t.y - f.y;
-  const len = Math.hypot(dx, dy);
-  if (len === 0) return;
-  const ux = dx / len, uy = dy / len;
+  function mkArrow(from, to, color, alpha = 1) {
+    if (from === to) return mkCircle(from, color, alpha);
+    const f = sqCenter(from), t = sqCenter(to);
+    const dx = t.x - f.x, dy = t.y - f.y;
+    const len = Math.hypot(dx, dy); if (len === 0) return '';
+    const ux = dx/len, uy = dy/len;
+    const lw = sqSz*0.14, hw = sqSz*0.22, hl = sqSz*0.28;
+    const px = -uy*hw, py = ux*hw;
+    const sx = f.x+ux*sqSz*0.22, sy = f.y+uy*sqSz*0.22;
+    const ex = t.x-ux*hl, ey = t.y-uy*hl;
+    return `<g opacity="${alpha}">
+      <line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}"
+        stroke="${color}" stroke-width="${lw.toFixed(1)}" stroke-linecap="round"/>
+      <polygon points="${t.x.toFixed(1)},${t.y.toFixed(1)} ${(ex+px).toFixed(1)},${(ey+py).toFixed(1)} ${(ex-px).toFixed(1)},${(ey-py).toFixed(1)}"
+        fill="${color}"/>
+    </g>`;
+  }
 
-  const lw = sqSz * 0.14;  // line width
-  const hw = sqSz * 0.22;  // arrowhead half-width
-  const hl = sqSz * 0.28;  // arrowhead length
-  const px = -uy * hw, py = ux * hw;
+  function mkCircle(sq, color, alpha = 1) {
+    const c = sqCenter(sq);
+    return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${(sqSz*0.44).toFixed(1)}"
+      fill="none" stroke="${color}" stroke-width="${(sqSz*0.1).toFixed(1)}" opacity="${alpha}"/>`;
+  }
 
-  const sx = f.x + ux * sqSz * 0.22;
-  const sy = f.y + uy * sqSz * 0.22;
-  const ex = t.x - ux * hl;
-  const ey = t.y - uy * hl;
+  let html = '';
 
-  svg.innerHTML = `
-    <line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}"
-      stroke="rgba(50,210,80,0.82)" stroke-width="${lw.toFixed(1)}" stroke-linecap="round"/>
-    <polygon points="${t.x.toFixed(1)},${t.y.toFixed(1)} ${(ex+px).toFixed(1)},${(ey+py).toFixed(1)} ${(ex-px).toFixed(1)},${(ey-py).toFixed(1)}"
-      fill="rgba(50,210,80,0.82)"/>
-  `;
+  // Opening hint arrow underneath user annotations
+  if (atLivePos() && currentMode === 'vs-computer' && playMode !== 'analysis') {
+    const hint = getHintArrow();
+    if (hint) html += mkArrow(hint.from, hint.to, 'rgba(50,210,80,0.82)');
+  }
+
+  // Committed user annotations
+  for (const a of annotations)
+    html += a.type === 'arrow' ? mkArrow(a.from, a.to, a.color) : mkCircle(a.sq, a.color);
+
+  // In-flight preview (semi-transparent)
+  if (previewAnnotation) {
+    const p = previewAnnotation;
+    html += p.type === 'arrow' ? mkArrow(p.from, p.to, p.color, 0.5) : mkCircle(p.sq, p.color, 0.5);
+  }
+
+  if (!html) return;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'annotSvg';
+  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible;';
+  svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+  svg.innerHTML = html;
   boardEl.appendChild(svg);
 }
 
@@ -1429,6 +1507,7 @@ function newGame() {
   game = new Chess();
   viewIdx = 0; selected = null; legalMoves = null;
   if (dragState) { dragState.ghost.remove(); dragState = null; }
+  annotations = []; annotatingFrom = null; previewAnnotation = null;
   setThinking(false);
   clockInit();
   if (currentMode === 'vs-computer') {
