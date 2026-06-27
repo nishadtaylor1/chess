@@ -79,7 +79,7 @@
     }
 
     /* ── eval bar ── */
-    .eval-col { flex-shrink: 0; width: 16px; display: flex; align-items: stretch; }
+    .eval-col { flex-shrink: 0; width: 16px; display: flex; align-items: stretch; align-self: stretch; }
     .eval-bar {
       width: 14px; flex: 1;
       background: #f0d9b5;
@@ -602,7 +602,7 @@ function initEvalWorker() {
       renderEvalBar(evalBest.type, wVal);
     }
   };
-  evalW.onerror = () => {};
+  evalW.onerror = e => console.error('Eval worker error:', e);
   evalW.postMessage('uci');
   evalW.postMessage('isready');
 }
