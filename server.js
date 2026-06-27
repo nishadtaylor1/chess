@@ -142,9 +142,15 @@ io.on('connection', socket => {
     } else {
       // Reconnecting player — update socketId, cancel any forfeit timer
       if (isWhite) room.white.socketId = socket.id;
-      else         room.black.socketId = socket.id;
+      else         room.black.socketId  = socket.id;
 
       if (room.disconnectTimer) { clearTimeout(room.disconnectTimer); room.disconnectTimer = null; }
+      if (room.status === 'waiting') broadcastLobby();
+      if (room.status === 'playing') {
+        // Tell the opponent the player reconnected
+        const oppSid = isWhite ? room.black?.socketId : room.white.socketId;
+        if (oppSid) io.to(oppSid).emit('game:opponent_reconnected', { username });
+      }
 
       socket.join(roomId);
       socket.emit('game:color', isWhite ? 'w' : 'b');
@@ -225,16 +231,20 @@ io.on('connection', socket => {
       if (!goneWhite && !goneBlack) continue;
 
       if (room.status === 'waiting' && goneWhite) {
-        rooms.delete(room.id);
+        // Give 30s for creator to reconnect (e.g. navigating to the chess page)
+        room.disconnectTimer = setTimeout(() => {
+          if (room.status === 'waiting') { rooms.delete(room.id); broadcastLobby(); }
+        }, 30000);
         broadcastLobby();
       } else if (room.status === 'playing') {
-        // Give 20 seconds to reconnect before forfeiting
         const opponent = goneWhite ? room.black?.socketId : room.white.socketId;
         if (opponent) io.to(opponent).emit('game:opponent_disconnected', { username });
         room.disconnectTimer = setTimeout(() => {
           if (room.status !== 'playing') return;
+          // Never forfeit before any moves — this window covers page-load reconnects
+          if (room.chess.history().length === 0) return;
           endRoom(room, goneWhite ? '0-1' : '1-0', 'disconnect');
-        }, 20000);
+        }, 60000); // 60s grace — reconnect via game:rejoin cancels this
       }
       break;
     }

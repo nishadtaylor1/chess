@@ -1443,7 +1443,11 @@ function initMultiplayer(roomId) {
   });
 
   mpSocket.on('game:opponent_disconnected', () => {
-    showToast('Opponent disconnected. They have 20 seconds to reconnect…', 5000);
+    showToast('Opponent disconnected. They have 60 seconds to reconnect…', 5000);
+  });
+
+  mpSocket.on('game:opponent_reconnected', ({ username }) => {
+    showToast(`${username} reconnected.`, 2500);
   });
 
   mpSocket.on('game:draw_offered', ({ from }) => {
