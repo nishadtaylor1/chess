@@ -15,6 +15,7 @@
       padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
     }
     nav .brand { font-size: 18px; font-weight: 700; }
+    nav .brand a { color: inherit; text-decoration: none; }
     nav .brand span { color: #6366f1; }
     nav .user { font-size: 13px; color: #94a3b8; display: flex; align-items: center; gap: 16px; }
     nav .user strong { color: #e2e8f0; }
@@ -253,6 +254,32 @@
     .nav-btn:hover { border-color:#6366f1; color:#6366f1; }
     .nav-btn:disabled { opacity:.3; cursor:default; border-color:#334155; color:#334155; }
 
+    /* multiplayer waiting overlay */
+    .mp-overlay {
+      display:none; position:absolute; inset:0; background:rgba(15,23,42,.88);
+      border-radius:3px; z-index:10; flex-direction:column;
+      align-items:center; justify-content:center; gap:14px; text-align:center;
+    }
+    .mp-overlay.visible { display:flex; }
+    .mp-overlay .spinner {
+      width:32px; height:32px; border:3px solid #334155;
+      border-top-color:#6366f1; border-radius:50%; animation:spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .mp-overlay .room-code {
+      font-family:monospace; font-size:28px; font-weight:700;
+      letter-spacing:5px; color:#6366f1;
+    }
+    .mp-overlay p { font-size:13px; color:#94a3b8; }
+
+    /* toast */
+    .toast {
+      position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+      background:#1e293b; border:1px solid #6366f1; border-radius:8px;
+      padding:10px 20px; font-size:13px; color:#a5b4fc; display:none; z-index:999;
+    }
+    .toast.show { display:block; }
+
     /* history */
     .history-list { max-height:140px; overflow-y:auto; }
     .hist-item {
@@ -266,9 +293,10 @@
 </head>
 <body>
 <nav>
-  <div class="brand">♟ <span>Chess</span></div>
+  <div class="brand"><a href="/chess">♟ <span>Chess</span></a></div>
   <div class="user">
     Signed in as <strong id="navUser">…</strong>
+    <a href="/lobby" style="font-size:12px;color:#94a3b8;text-decoration:none;border:1px solid #475569;padding:5px 12px;border-radius:5px;">Play a Friend</a>
     <form action="/logout" method="POST" style="margin:0"><button type="submit">Sign out</button></form>
   </div>
 </nav>
@@ -280,7 +308,14 @@
       <span class="player-name" id="barBlackName">⬛ Computer</span>
       <span class="player-clock" id="clockBlack">∞</span>
     </div>
-    <div class="board-outer">
+    <div class="board-outer" style="position:relative;">
+      <!-- waiting-for-opponent overlay (multiplayer) -->
+      <div class="mp-overlay" id="mpOverlay">
+        <div class="spinner"></div>
+        <div class="room-code" id="mpRoomCode"></div>
+        <p>Waiting for your opponent…<br>Share this code or the link below.</p>
+        <button class="btn sec" id="mpCopyBtn" style="padding:6px 16px;font-size:12px;">Copy Link</button>
+      </div>
       <div class="board-row">
         <div class="eval-col">
           <div class="eval-bar" id="evalBar">
@@ -309,6 +344,7 @@
     <div class="mode-tabs">
       <button class="mode-tab active" id="tabVC" onclick="setMode('vs-computer')">vs Computer</button>
       <button class="mode-tab" id="tabCC" onclick="setMode('cpu-vs-cpu')">CPU vs CPU</button>
+      <button class="mode-tab" id="tabMP" onclick="goToLobby()">Play Friend</button>
     </div>
 
     <!-- vs Computer -->
@@ -401,6 +437,18 @@
       </div>
     </div>
 
+    <!-- Multiplayer panel -->
+    <div id="mpSection" style="display:none;">
+      <div class="psec">
+        <div class="status-box" id="mpStatus">Connecting…</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn warn" id="mpDrawBtn" onclick="mpOfferDraw()" style="display:none;">Offer Draw</button>
+        <button class="btn dng"  id="mpResignBtn" onclick="mpResign()" style="display:none;">Resign</button>
+      </div>
+      <button class="btn sec" onclick="goToLobby()" style="margin-top:4px;">← Back to Lobby</button>
+    </div>
+
     <!-- Move list + nav -->
     <div class="psec">
       <div class="move-list">
@@ -428,6 +476,9 @@
   </div>
 </div>
 
+<div class="toast" id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
 <script type="module">
 import { Chess } from '/js/chess.esm.js';
 
@@ -608,7 +659,7 @@ let legalMoves  = null;
 let viewIdx     = 0;   // index into game.history() the user is currently viewing
 let sfW         = null;
 let sfB         = null;
-let currentMode = 'vs-computer'; // 'vs-computer' | 'cpu-vs-cpu'
+let currentMode = 'vs-computer'; // 'vs-computer' | 'cpu-vs-cpu' | 'multiplayer'
 let playMode    = 'casual';      // 'casual' | 'challenge' | 'analysis'
 let aiThinking  = false;
 let gameId      = 0;
@@ -617,6 +668,13 @@ let cpuPaused   = false;
 let cpuSpeed    = 900;
 let cpuTid      = null;
 let dragState   = null;
+
+// multiplayer
+let mpSocket    = null;
+let mpRoomId    = null;
+let mpColor     = null; // 'w' | 'b'
+let mpOpponent  = '';
+let mpDrawOffered = false;
 
 // eval bar
 let evalW     = null;   // dedicated eval Stockfish worker (never used for moves)
@@ -644,6 +702,9 @@ window.goBack      = goBack;
 window.goForward   = goForward;
 window.goToEnd     = goToEnd;
 window.goToMove    = goToMove;
+window.goToLobby   = goToLobby;
+window.mpOfferDraw = mpOfferDraw;
+window.mpResign    = mpResign;
 
 // ── ELO sliders ───────────────────────────────────────────────────────────
 function syncEloDisplay(slider, numEl, labelEl, subEl) {
@@ -767,8 +828,11 @@ function renderBoard() {
     hFrom = m.from; hTo = m.to;
   }
 
-  for (let rank = 7; rank >= 0; rank--) {
-    for (let file = 0; file < 8; file++) {
+  const flipBoard = currentMode === 'multiplayer' && mpColor === 'b';
+  const rankOrder = flipBoard ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0];
+  const fileOrder = flipBoard ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+  for (const rank of rankOrder) {
+    for (const file of fileOrder) {
       const sq    = String.fromCharCode(97 + file) + (rank + 1);
       const light = (rank + file) % 2 === 1;
       const cell  = document.createElement('div');
@@ -797,11 +861,13 @@ function renderBoard() {
   // Rank labels
   const rc = document.getElementById('rankCol');
   rc.innerHTML = '';
-  for (let r = 8; r >= 1; r--) { const d = document.createElement('div'); d.textContent=r; rc.appendChild(d); }
+  const ranks = flipBoard ? [1,2,3,4,5,6,7,8] : [8,7,6,5,4,3,2,1];
+  ranks.forEach(r => { const d=document.createElement('div'); d.textContent=r; rc.appendChild(d); });
   // File labels
   const fl = document.getElementById('fileLabels');
   fl.innerHTML = '';
-  for (const f of 'abcdefgh') { const d=document.createElement('div'); d.className='file-label'; d.textContent=f; fl.appendChild(d); }
+  const files = flipBoard ? 'hgfedcba' : 'abcdefgh';
+  for (const f of files) { const d=document.createElement('div'); d.className='file-label'; d.textContent=f; fl.appendChild(d); }
 
   // View banner
   const banner = document.getElementById('viewBanner');
@@ -823,7 +889,10 @@ function updateStatus() {
   else if (game.isDraw())      el.textContent = '🤝 Draw';
   else if (game.isCheck())
     el.textContent = game.turn()==='w' ? '⚠️ White is in check' : '⚠️ Black is in check';
-  else if (currentMode === 'vs-computer' && playMode !== 'analysis')
+  else if (currentMode === 'multiplayer') {
+    const myTurn = game.turn() === mpColor;
+    el.textContent = myTurn ? '🟢 Your turn' : `⏳ ${mpOpponent}'s turn…`;
+  } else if (currentMode === 'vs-computer' && playMode !== 'analysis')
     el.textContent = game.turn()==='w' ? '🟢 Your turn (White)' : '⏳ AI is thinking…';
   else
     el.textContent = game.turn()==='w' ? '⬜ White to move' : '⬛ Black to move';
@@ -907,6 +976,11 @@ async function copyPgn() {
 // ── Drag & drop ────────────────────────────────────────────────────────────
 function canInteract() {
   if (game.isGameOver()) return false;
+  if (currentMode === 'multiplayer') {
+    if (!mpColor || !mpRoomId) return false;
+    if (!atLivePos()) return false;
+    return game.turn() === mpColor;
+  }
   if (currentMode === 'vs-computer') {
     if (aiThinking) return false;
     if (!atLivePos() && playMode !== 'analysis') return false;
@@ -927,9 +1001,9 @@ function onSqDown(sq, e) {
   }
 
   const piece = vg.get(sq);
-  const myColor = currentMode === 'vs-computer' && playMode !== 'analysis'
-    ? 'w'
-    : vg.turn();
+  const myColor = currentMode === 'multiplayer'
+    ? mpColor
+    : (currentMode === 'vs-computer' && playMode !== 'analysis' ? 'w' : vg.turn());
 
   if (!piece || piece.color !== myColor) {
     selected = null; legalMoves = null; renderBoard(); return;
@@ -976,6 +1050,10 @@ document.addEventListener('mouseup', e => {
 
 // ── Move logic ─────────────────────────────────────────────────────────────
 function handleMove(from, to, promotion = 'q') {
+  if (currentMode === 'multiplayer') {
+    mpSocket.emit('game:move', { roomId: mpRoomId, from, to, promotion });
+    return; // server will echo back; apply on receipt
+  }
   // In analysis mode, branch the game from the current view position
   if (!atLivePos() && playMode === 'analysis') {
     const h = getHistory().slice(0, viewIdx);
@@ -997,6 +1075,11 @@ function doMove(from, to, promotion = 'q') {
   renderBoard(); updateStatus(); updateMoveList();
   scheduleEval(game.fen(), game.turn());
 
+  if (currentMode === 'multiplayer') {
+    if (game.isGameOver()) clockStop();
+    // move already applied locally; the server will echo it back to both players
+    return true;
+  }
   if (currentMode === 'vs-computer' && playMode !== 'analysis') {
     if (game.isGameOver()) {
       clockStop();
@@ -1232,6 +1315,165 @@ document.addEventListener('keydown', e => {
   if (e.key === 'End')        { e.preventDefault(); goToEnd(); }
 });
 
+// ── Multiplayer ────────────────────────────────────────────────────────────
+function showToast(msg, ms = 3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
+}
+
+function goToLobby() {
+  if (mpSocket) mpSocket.disconnect();
+  window.location.href = '/lobby';
+}
+
+function enterMultiplayerMode() {
+  currentMode = 'multiplayer';
+  document.getElementById('tabVC').classList.remove('active');
+  document.getElementById('tabCC').classList.remove('active');
+  document.getElementById('tabMP').classList.add('active');
+  document.getElementById('vcSection').style.display = 'none';
+  document.getElementById('ccSection').style.display = 'none';
+  document.getElementById('mpSection').style.display = '';
+  if (cpuRunning) stopCpuGame();
+}
+
+function mpSetPlayerBars(whiteName, blackName) {
+  if (mpColor === 'b') {
+    document.getElementById('barWhiteName').textContent = '⬜ ' + whiteName;
+    document.getElementById('barBlackName').textContent = '⬛ ' + blackName + ' (You)';
+  } else {
+    document.getElementById('barWhiteName').textContent = '⬜ ' + whiteName + ' (You)';
+    document.getElementById('barBlackName').textContent = '⬛ ' + blackName;
+  }
+}
+
+function mpResign() {
+  if (!mpRoomId) return;
+  mpSocket.emit('game:resign', { roomId: mpRoomId });
+}
+
+function mpOfferDraw() {
+  if (!mpRoomId) return;
+  mpSocket.emit('game:draw_offer', { roomId: mpRoomId });
+  document.getElementById('mpDrawBtn').disabled = true;
+  showToast('Draw offer sent.');
+}
+
+function mpBeginGame(white, black) {
+  mpOpponent = mpColor === 'w' ? black : white;
+  mpSetPlayerBars(white, black);
+  document.getElementById('mpOverlay').classList.remove('visible');
+  document.getElementById('mpStatus').textContent = `Playing vs ${mpOpponent}`;
+  document.getElementById('mpDrawBtn').style.display   = '';
+  document.getElementById('mpResignBtn').style.display = '';
+  gameId++; selected = null; legalMoves = null;
+  clockInit(); resetEvalBar();
+  renderBoard(); updateStatus(); updateMoveList();
+}
+
+function initMultiplayer(roomId) {
+  mpRoomId = roomId;
+  mpSocket  = io();
+  enterMultiplayerMode();
+
+  document.getElementById('mpRoomCode').textContent = roomId;
+  document.getElementById('mpOverlay').classList.add('visible');
+  document.getElementById('mpStatus').textContent = 'Connecting…';
+
+  document.getElementById('mpCopyBtn').onclick = () => {
+    navigator.clipboard.writeText(`${location.origin}/chess?room=${roomId}`)
+      .then(() => showToast('Link copied!'));
+  };
+
+  mpSocket.on('connect', () => {
+    mpSocket.emit('game:rejoin', { roomId });
+  });
+
+  mpSocket.on('game:color', color => { mpColor = color; });
+
+  // Sent to reconnecting player with current room state
+  mpSocket.on('game:state', ({ white, black, fen, pgn, status }) => {
+    if (status === 'waiting') {
+      document.getElementById('mpStatus').textContent = 'Waiting for opponent…';
+    } else if (status === 'playing') {
+      // Reconstruct game from PGN so move list is preserved
+      game = new Chess();
+      if (pgn) { try { game.loadPgn(pgn); } catch(_) {} }
+      viewIdx = game.history().length;
+      mpBeginGame(white, black);
+      scheduleEval(game.fen(), game.turn());
+    } else {
+      document.getElementById('mpStatus').textContent = 'This game has ended.';
+      document.getElementById('mpOverlay').classList.remove('visible');
+    }
+  });
+
+  // Sent to both players when a new opponent joins
+  mpSocket.on('game:start', ({ white, black }) => {
+    game = new Chess(); viewIdx = 0;
+    mpBeginGame(white, black);
+  });
+
+  mpSocket.on('game:move', ({ from, to, promotion }) => {
+    doMove(from, to, promotion || 'q');
+    scheduleEval(game.fen(), game.turn());
+  });
+
+  mpSocket.on('game:illegal', () => {
+    // Roll back the visual — re-render at current server state
+    renderBoard(); updateStatus();
+    showToast('Illegal move.', 1800);
+  });
+
+  mpSocket.on('game:end', ({ result, reason }) => {
+    clockStop();
+    document.getElementById('mpDrawBtn').style.display   = 'none';
+    document.getElementById('mpResignBtn').style.display = 'none';
+    const won  = (result === '1-0' && mpColor === 'w') || (result === '0-1' && mpColor === 'b');
+    const drew = result === '1/2-1/2';
+    const labels = { checkmate:'checkmate', stalemate:'stalemate', resignation:'resignation',
+                     agreement:'draw by agreement', disconnect:'opponent disconnected' };
+    const reasonStr = labels[reason] || reason;
+    document.getElementById('mpStatus').textContent =
+      drew ? `🤝 Draw — ${reasonStr}` :
+      won  ? `🏆 You win! (${reasonStr})` : `💀 You lose — ${reasonStr}`;
+    loadHistory();
+    mpRoomId = null;
+  });
+
+  mpSocket.on('game:opponent_disconnected', () => {
+    showToast('Opponent disconnected. They have 20 seconds to reconnect…', 5000);
+  });
+
+  mpSocket.on('game:draw_offered', ({ from }) => {
+    showToast(`${from} offers a draw.`, 8000);
+    const drawBtn = document.getElementById('mpDrawBtn');
+    drawBtn.textContent = 'Accept Draw';
+    drawBtn.disabled    = false;
+    drawBtn.onclick     = () => {
+      mpSocket.emit('game:draw_accept', { roomId: mpRoomId });
+      drawBtn.onclick    = mpOfferDraw;
+      drawBtn.textContent = 'Offer Draw';
+    };
+  });
+
+  mpSocket.on('game:draw_declined', () => {
+    showToast('Draw offer declined.', 2500);
+    document.getElementById('mpDrawBtn').disabled = false;
+  });
+
+  mpSocket.on('game:error', msg => {
+    document.getElementById('mpStatus').textContent = msg;
+    document.getElementById('mpOverlay').classList.remove('visible');
+    showToast(msg, 4000);
+  });
+
+  mpSocket.on('disconnect', () => {
+    if (mpRoomId) showToast('Connection lost — trying to reconnect…', 4000);
+  });
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────
 (async () => {
   initEvalWorker();
@@ -1242,7 +1484,14 @@ document.addEventListener('keydown', e => {
   syncEloDisplay(wEloSlider, document.getElementById('wEloNum'), null, null);
   syncEloDisplay(bEloSlider, document.getElementById('bEloNum'), null, null);
   await loadHistory();
-  newGame();
+
+  const roomId = new URLSearchParams(location.search).get('room');
+  if (roomId) {
+    newGame(); // init board state
+    initMultiplayer(roomId);
+  } else {
+    newGame();
+  }
 })();
 </script>
 </body>

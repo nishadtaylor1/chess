@@ -3,7 +3,9 @@ const db      = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const router  = express.Router();
 
-router.get('/',        requireAuth, (req, res) => res.sendFile('chess.html', { root: 'public' }));
+router.get('/',        requireAuth, (req, res) => res.redirect('/chess'));
+router.get('/chess',   requireAuth, (req, res) => res.sendFile('chess.html', { root: 'public' }));
+router.get('/lobby',   requireAuth, (req, res) => res.sendFile('lobby.html', { root: 'public' }));
 router.get('/api/me',  requireAuth, (req, res) => res.json({ username: req.session.username }));
 
 router.post('/api/games', requireAuth, async (req, res) => {

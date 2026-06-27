@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lobby — Chess</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f172a; color: #e2e8f0; min-height: 100vh;
+    }
+    nav {
+      background: #1e293b; border-bottom: 1px solid #334155;
+      padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand { font-size: 18px; font-weight: 700; }
+    .brand a { color: inherit; text-decoration: none; }
+    .brand span { color: #6366f1; }
+    .user { font-size: 13px; color: #94a3b8; display: flex; align-items: center; gap: 16px; }
+    .user strong { color: #e2e8f0; }
+    .user button {
+      background: none; border: 1px solid #475569; color: #94a3b8;
+      padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    }
+    .user button:hover { border-color: #6366f1; color: #6366f1; }
+
+    .page { max-width: 640px; margin: 40px auto; padding: 0 20px; }
+    h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .sub { color: #64748b; font-size: 13px; margin-bottom: 28px; }
+
+    .card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+      padding: 22px; margin-bottom: 24px;
+    }
+    .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 5px; }
+    .card p  { font-size: 13px; color: #94a3b8; margin-bottom: 16px; }
+
+    .btn {
+      padding: 9px 20px; background: #6366f1; color: white; border: none;
+      border-radius: 7px; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: background .15s;
+    }
+    .btn:hover { background: #4f46e5; }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .btn.sec {
+      background: transparent; border: 1px solid #334155; color: #94a3b8;
+    }
+    .btn.sec:hover { border-color: #6366f1; color: #6366f1; }
+
+    .section-head {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .07em; color: #475569; margin-bottom: 10px;
+    }
+    .games-list { display: flex; flex-direction: column; gap: 8px; }
+    .game-row {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .game-row .who { font-size: 14px; font-weight: 600; }
+    .game-row .when { font-size: 11px; color: #475569; margin-top: 2px; }
+    .empty { color: #475569; font-size: 13px; text-align: center; padding: 28px 0; }
+
+    .also-link { margin-top: 28px; text-align: center; font-size: 13px; color: #475569; }
+    .also-link a { color: #6366f1; text-decoration: none; }
+    .also-link a:hover { text-decoration: underline; }
+
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: #1e293b; border: 1px solid #6366f1; border-radius: 8px;
+      padding: 10px 20px; font-size: 13px; color: #a5b4fc;
+      display: none; z-index: 99;
+    }
+    .toast.show { display: block; }
+  </style>
+</head>
+<body>
+<nav>
+  <div class="brand"><a href="/chess">♟ <span>Chess</span></a></div>
+  <div class="user">
+    Signed in as <strong id="navUser">…</strong>
+    <form action="/logout" method="POST" style="margin:0">
+      <button type="submit">Sign out</button>
+    </form>
+  </div>
+</nav>
+
+<div class="page">
+  <h2>Play a Friend</h2>
+  <p class="sub">Create a game and share the link, or join an open game below.</p>
+
+  <div class="card">
+    <h3>Create a Game</h3>
+    <p>You'll play as White. A shareable link is generated automatically.</p>
+    <button class="btn" id="createBtn">Create Game</button>
+  </div>
+
+  <div class="section-head">Open Games</div>
+  <div class="games-list" id="gamesList">
+    <div class="empty">No open games right now.</div>
+  </div>
+
+  <div class="also-link">
+    Want to play the computer? <a href="/chess">Solo play</a>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  let myUsername = '';
+
+  function showToast(msg, ms = 2500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), ms);
+  }
+
+  function renderGames(list) {
+    const el = document.getElementById('gamesList');
+    if (!list.length) {
+      el.innerHTML = '<div class="empty">No open games right now.</div>';
+      return;
+    }
+    el.innerHTML = list.map(g => {
+      const ago  = Math.round((Date.now() - new Date(g.createdAt)) / 1000);
+      const when = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
+      const isOwn = g.creator === myUsername;
+      return `<div class="game-row">
+        <div>
+          <div class="who">♟ ${g.creator}</div>
+          <div class="when">${when}</div>
+        </div>
+        ${isOwn
+          ? '<span style="font-size:12px;color:#475569">Your open game</span>'
+          : `<button class="btn" onclick="joinGame('${g.id}')">Join</button>`
+        }
+      </div>`;
+    }).join('');
+  }
+
+  document.getElementById('createBtn').addEventListener('click', () => {
+    document.getElementById('createBtn').disabled = true;
+    socket.emit('lobby:create');
+  });
+
+  function joinGame(roomId) {
+    window.location.href = `/chess?room=${roomId}`;
+  }
+
+  socket.on('lobby:list', renderGames);
+
+  socket.on('lobby:created', ({ roomId }) => {
+    window.location.href = `/chess?room=${roomId}`;
+  });
+
+  socket.on('lobby:error', msg => {
+    showToast(msg, 3500);
+    document.getElementById('createBtn').disabled = false;
+  });
+
+  (async () => {
+    try {
+      const me = await fetch('/api/me').then(r => r.json());
+      document.getElementById('navUser').textContent = me.username;
+      myUsername = me.username;
+    } catch (_) {}
+    socket.emit('lobby:get');
+  })();
+</script>
+</body>
+</html>
