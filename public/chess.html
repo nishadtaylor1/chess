@@ -309,6 +309,49 @@
     .hist-item .res { font-weight:700; color:#6366f1; }
     .hist-meta { color:#475569; font-size:10px; text-align:right; }
 
+    /* ── Win celebration ──────────────────────────────────────── */
+    #confettiCanvas {
+      position:fixed; inset:0; width:100%; height:100%;
+      pointer-events:none; z-index:199; display:none;
+    }
+    #winModal {
+      display:none; position:fixed; inset:0; z-index:200;
+      background:rgba(0,0,0,.72);
+      align-items:center; justify-content:center;
+    }
+    #winModal.visible { display:flex; }
+    .win-box {
+      background:#1e293b; border:1px solid #475569; border-radius:16px;
+      padding:40px 50px; text-align:center; min-width:290px;
+      box-shadow:0 24px 64px rgba(0,0,0,.85);
+      animation:win-pop .35s cubic-bezier(.34,1.56,.64,1);
+    }
+    @keyframes win-pop { from{transform:scale(.7);opacity:0} to{transform:scale(1);opacity:1} }
+    .win-trophy  { font-size:60px; line-height:1; margin-bottom:10px; }
+    .win-title   { font-size:26px; font-weight:800; color:#f0d9b5; margin-bottom:24px; }
+    .win-elo-row { display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:6px; }
+    .win-elo-old { font-size:24px; font-weight:700; color:#64748b; }
+    .win-elo-arrow { font-size:20px; color:#475569; }
+    .win-elo-new  { font-size:42px; font-weight:800; color:#6366f1; }
+    .win-elo-delta { font-size:15px; font-weight:700; color:#4ade80;
+      margin-bottom:26px; opacity:0; transition:opacity .4s; }
+    .win-elo-delta.show { opacity:1; }
+
+    /* ── Review banner ────────────────────────────────────────── */
+    #reviewBanner {
+      display:none; background:#1a2a1a; border:1px solid #2d6a2d;
+      border-radius:6px; padding:5px 12px; font-size:12px;
+      color:#86efac; text-align:center; margin-top:4px;
+    }
+    #reviewBanner button {
+      background:#16a34a; border:none; color:white; padding:2px 8px;
+      border-radius:4px; font-size:11px; cursor:pointer; margin-left:8px;
+    }
+
+    /* ── Clickable history items ──────────────────────────────── */
+    .hist-item { cursor:pointer; transition:border-color .12s, background .12s; }
+    .hist-item:hover { border-color:#6366f1; background:rgba(99,102,241,.1); }
+
     /* Move quality badge */
     .move-badge {
       position:absolute; top:3px; right:3px;
@@ -369,6 +412,9 @@
     <div class="view-banner" id="viewBanner">
       Viewing move <span id="viewPos"></span>
       <button onclick="goToEnd()">↩ Back to live</button>
+    </div>
+    <div id="reviewBanner">⏪ Reviewing past game
+      <button onclick="closeReview()">× Close</button>
     </div>
   </div>
 
@@ -532,6 +578,22 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<canvas id="confettiCanvas"></canvas>
+
+<div id="winModal">
+  <div class="win-box">
+    <div class="win-trophy">🏆</div>
+    <div class="win-title">You Won!</div>
+    <div class="win-elo-row">
+      <span class="win-elo-old" id="winOldElo">0</span>
+      <span class="win-elo-arrow">→</span>
+      <span class="win-elo-new" id="winNewElo">0</span>
+    </div>
+    <div class="win-elo-delta" id="winEloDelta">+0 ELO</div>
+    <button class="btn" onclick="closeWinModal()" style="width:160px">Play Again</button>
+  </div>
+</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script type="module">
@@ -1179,6 +1241,10 @@ let evalQueue = null;   // { fen, turn } buffered while worker initialises
 let evalBest  = { type:'cp', value:0 };
 let evalTurn  = 'w';
 
+// review / history
+let reviewingHistory = false;
+let pendingMpWin     = false; // set in game:end so applyEloUpdate can trigger modal
+
 // move quality
 let prevEvalState       = { type:'cp', wVal:0 }; // last completed eval (White's perspective)
 let pendingQualityCheck = null; // { moverColor, prev, toSq } | null
@@ -1191,8 +1257,10 @@ let clockTid    = null;
 let clockActive = null; // 'w' | 'b' | null
 
 // expose to onclick attrs
-window.setMode     = setMode;
-window.setPlayMode = setPlayMode;
+window.setMode       = setMode;
+window.setPlayMode   = setPlayMode;
+window.closeWinModal = closeWinModal;
+window.closeReview   = closeReview;
 window.setSpeed    = setSpeed;
 window.startCpuGame= startCpuGame;
 window.stopCpuGame = stopCpuGame;
@@ -1405,6 +1473,7 @@ function renderBoard() {
 
 function updateStatus() {
   const el = document.getElementById('status');
+  if (reviewingHistory) { el.textContent = '⏪ Reviewing — ← → to navigate'; return; }
   if (game.isCheckmate())
     el.textContent = game.turn() === 'w' ? '💀 Black wins by checkmate!' : '🏆 White wins by checkmate!';
   else if (game.isStalemate()) el.textContent = '🤝 Stalemate — Draw';
@@ -1501,6 +1570,7 @@ document.getElementById('board').addEventListener('contextmenu', e => e.preventD
 
 // ── Drag & drop ────────────────────────────────────────────────────────────
 function canInteract() {
+  if (reviewingHistory) return false;
   if (game.isGameOver()) return false;
   if (currentMode === 'multiplayer') {
     if (!mpColor || !mpRoomId) return false;
@@ -2062,6 +2132,8 @@ function newGame() {
   if (moveQualityTimer) { clearTimeout(moveQualityTimer); moveQualityTimer = null; }
   moveQualityBadge = null; pendingQualityCheck = null;
   prevEvalState = { type:'cp', wVal:0 };
+  reviewingHistory = false;
+  document.getElementById('reviewBanner').style.display = 'none';
   unlockSettings();
   setThinking(false);
   clockInit();
@@ -2076,16 +2148,23 @@ function newGame() {
 
 function applyEloUpdate(eloChange, newElo) {
   if (newElo == null || eloChange == null) return;
+  const oldElo = playerElo;
   playerElo = newElo;
   document.getElementById('navElo').textContent = newElo;
-  const sign = eloChange >= 0 ? '+' : '';
-  showToast(`${sign}${eloChange} ELO  (now ${newElo})`, 4000);
+  if (pendingMpWin) {
+    pendingMpWin = false;
+    showWinModal(oldElo, newElo, eloChange);
+  } else {
+    const sign = eloChange >= 0 ? '+' : '';
+    showToast(`${sign}${eloChange} ELO  (now ${newElo})`, 4000);
+  }
 }
 
 async function saveGame(mode, wElo, bElo, resultOverride = null) {
   const result = resultOverride || (game.isCheckmate()
     ? (game.turn() === 'w' ? 'loss' : 'win')
     : 'draw');
+  const oldElo = playerElo;
   try {
     const data = await fetch('/api/games', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -2095,7 +2174,16 @@ async function saveGame(mode, wElo, bElo, resultOverride = null) {
         black_elo: bElo === 'Max' ? 9999 : (Number(bElo)||null),
       }),
     }).then(r => r.json());
-    if (mode === 'vs-computer') applyEloUpdate(data.eloChange, data.newElo);
+    if (mode === 'vs-computer' && data.eloChange != null && data.newElo != null) {
+      playerElo = data.newElo;
+      document.getElementById('navElo').textContent = data.newElo;
+      if (result === 'win') {
+        showWinModal(oldElo, data.newElo, data.eloChange);
+      } else {
+        const sign = data.eloChange >= 0 ? '+' : '';
+        showToast(`${sign}${data.eloChange} ELO  (now ${data.newElo})`, 4000);
+      }
+    }
   } catch(_) {}
   loadHistory();
 }
@@ -2117,23 +2205,26 @@ async function loadHistory() {
   try { rows = await fetch('/api/games').then(r => r.json()); } catch(_){}
   const el = document.getElementById('gameHistory');
   if (!rows.length) {
-    el.innerHTML = '<div class="hist-item" style="justify-content:center;color:#475569;">No games yet</div>';
+    el.innerHTML = '<div class="hist-item" style="justify-content:center;color:#475569;cursor:default">No games yet</div>';
     return;
   }
   const icons = { win:'🏆', loss:'💀', draw:'🤝', resign:'🏳', flag:'⏱' };
-  el.innerHTML = rows.slice(0,8).map(g => {
+  el.innerHTML = '';
+  rows.slice(0, 8).forEach(g => {
     const modeStr = g.difficulty === 'cpu-vs-cpu' ? 'CPU vs CPU' : 'vs AI';
     const wE = g.white_elo === 9999 ? 'Max' : g.white_elo;
     const bE = g.black_elo === 9999 ? 'Max' : g.black_elo;
     const eloStr = g.difficulty === 'cpu-vs-cpu'
       ? `W:${wE} B:${bE}`
-      : (bE ? `ELO ${bE}` : g.difficulty||'');
-    return `<div class="hist-item">
-      <span>${icons[g.result]||'🎮'} <span class="res">${g.result}</span>
+      : (bE ? `ELO ${bE}` : g.difficulty || '');
+    const div = document.createElement('div');
+    div.className = 'hist-item';
+    div.innerHTML = `<span>${icons[g.result]||'🎮'} <span class="res">${g.result}</span>
         <span style="color:#475569;font-size:10px;">${modeStr}</span></span>
-      <div class="hist-meta">${eloStr}<br>${new Date(g.started_at).toLocaleDateString()}</div>
-    </div>`;
-  }).join('');
+      <div class="hist-meta">${eloStr}<br>${new Date(g.started_at).toLocaleDateString()}</div>`;
+    if (g.pgn) div.onclick = () => replayGame(g.pgn);
+    el.appendChild(div);
+  });
 }
 
 // ── Keyboard shortcuts ─────────────────────────────────────────────────────
@@ -2155,6 +2246,113 @@ function showToast(msg, ms = 3000) {
 function goToLobby() {
   if (mpSocket) mpSocket.disconnect();
   window.location.href = '/lobby';
+}
+
+// ── Win celebration ─────────────────────────────────────────────────────────
+function showWinModal(oldElo, newElo, eloChange) {
+  document.getElementById('winOldElo').textContent = oldElo;
+  document.getElementById('winNewElo').textContent = oldElo;
+  const deltaEl = document.getElementById('winEloDelta');
+  deltaEl.textContent = (eloChange >= 0 ? '+' : '') + eloChange + ' ELO';
+  deltaEl.classList.remove('show');
+  document.getElementById('winModal').classList.add('visible');
+  launchConfetti();
+  setTimeout(() => {
+    animateEloCount(document.getElementById('winNewElo'), oldElo, newElo, 1400);
+    setTimeout(() => deltaEl.classList.add('show'), 1200);
+  }, 500);
+}
+
+function closeWinModal() {
+  document.getElementById('winModal').classList.remove('visible');
+  stopConfetti();
+  newGame();
+}
+
+function animateEloCount(el, from, to, duration) {
+  const start = performance.now();
+  const tick = ts => {
+    const p = Math.min((ts - start) / duration, 1);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(from + (to - from) * eased);
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+let confettiRafId = null;
+function launchConfetti() {
+  const canvas = document.getElementById('confettiCanvas');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  canvas.style.display = 'block';
+  const ctx = canvas.getContext('2d');
+  const palette = ['#6366f1','#f0d9b5','#4ade80','#1bada6','#a855f7','#fbbf24','#e2e8f0','#f472b6'];
+  const particles = Array.from({ length: 220 }, () => ({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height * 0.6 - canvas.height * 0.3,
+    w: 6 + Math.random() * 8, h: 4 + Math.random() * 6,
+    color: palette[Math.floor(Math.random() * palette.length)],
+    vx: (Math.random() - 0.5) * 5,
+    vy: -2 + Math.random() * 5,
+    rot: Math.random() * Math.PI * 2,
+    rotV: (Math.random() - 0.5) * 0.18,
+    alpha: 1,
+  }));
+  const t0 = performance.now();
+  function draw(ts) {
+    const elapsed = ts - t0;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let anyAlive = false;
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.13; p.rot += p.rotV;
+      if (elapsed > 2200) p.alpha = Math.max(0, p.alpha - 0.014);
+      if (p.alpha > 0 && p.y < canvas.height + 30) anyAlive = true;
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    confettiRafId = anyAlive ? requestAnimationFrame(draw) : null;
+    if (!anyAlive) canvas.style.display = 'none';
+  }
+  if (confettiRafId) cancelAnimationFrame(confettiRafId);
+  confettiRafId = requestAnimationFrame(draw);
+}
+
+function stopConfetti() {
+  if (confettiRafId) { cancelAnimationFrame(confettiRafId); confettiRafId = null; }
+  const canvas = document.getElementById('confettiCanvas');
+  canvas.style.display = 'none';
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+}
+
+// ── History review ──────────────────────────────────────────────────────────
+function replayGame(pgn) {
+  if (game.history().length > 0 && !game.isGameOver() && !reviewingHistory) {
+    if (!confirm('Leave your current game to review this one?')) return;
+  }
+  if (cpuRunning) stopCpuGame();
+  gameId++; setThinking(false); clockStop();
+  if (moveQualityTimer) { clearTimeout(moveQualityTimer); moveQualityTimer = null; }
+  moveQualityBadge = null; pendingQualityCheck = null;
+  annotations = []; hintArrow = null;
+  game = new Chess();
+  try { game.loadPgn(pgn); } catch(_) { showToast('Could not load game.', 2000); return; }
+  reviewingHistory = true;
+  viewIdx = 0; selected = null; legalMoves = null;
+  unlockSettings(); resetEvalBar();
+  document.getElementById('reviewBanner').style.display = '';
+  renderBoard(); updateStatus(); updateMoveList();
+}
+
+function closeReview() {
+  reviewingHistory = false;
+  document.getElementById('reviewBanner').style.display = 'none';
+  newGame();
 }
 
 function enterMultiplayerMode() {
@@ -2264,6 +2462,7 @@ function initMultiplayer(roomId) {
     document.getElementById('mpResignBtn').style.display = 'none';
     const won  = (result === '1-0' && mpColor === 'w') || (result === '0-1' && mpColor === 'b');
     const drew = result === '1/2-1/2';
+    if (won) pendingMpWin = true;
     const labels = { checkmate:'checkmate', stalemate:'stalemate', resignation:'resignation',
                      agreement:'draw by agreement', disconnect:'opponent disconnected' };
     const reasonStr = labels[reason] || reason;
