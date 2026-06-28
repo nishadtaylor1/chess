@@ -21,6 +21,14 @@ const reviewStore = useReviewStore()
 
 const { annotations, previewAnnotation, annotatingFrom, toggleAnnotation, clearAnnotations, getAnnotationColor } = useAnnotations()
 
+// Only pass the emit function to handleMove when actually in multiplayer.
+// In vs-computer / cpu-vs-cpu the prop is still a function (always defined in
+// ChessView), so we must gate it here — otherwise handleMove takes the
+// "multiplayer" branch, emits to a null socket, and returns without moving.
+const emitFn = computed(() =>
+  uiStore.currentMode === 'multiplayer' ? props.mpEmitMove : null
+)
+
 // Drag state (local refs — correctly use .value)
 const dragState    = ref(null)  // { fromSq, pieceImg }
 const ghostVisible = ref(false)
@@ -135,7 +143,7 @@ function onSqDown(sq, e) {
     const from = gameStore.selected
     gameStore.selected   = null
     gameStore.legalMoves = null
-    gameStore.handleMove(from, sq, 'q', props.mpEmitMove)
+    gameStore.handleMove(from, sq, 'q', emitFn.value)
     return
   }
 
@@ -209,7 +217,7 @@ function onMouseUp(e) {
   if (toSq && toSq !== fromSq && gameStore.legalMoves?.find(m => m.to === toSq)) {
     gameStore.selected   = null
     gameStore.legalMoves = null
-    gameStore.handleMove(fromSq, toSq, 'q', props.mpEmitMove)
+    gameStore.handleMove(fromSq, toSq, 'q', emitFn.value)
   } else if (toSq === fromSq) {
     // Keep selection — piece was picked up and put back
   } else {

@@ -11,9 +11,8 @@ function calcEloChange(playerElo, opponentElo, score) {
 
 const RESULT_SCORE = { win: 1, draw: 0.5, loss: 0, resign: 0, flag: 0 };
 
-router.get('/',        requireAuth, (req, res) => res.redirect('/chess'));
-router.get('/chess',   requireAuth, (req, res) => res.sendFile('chess.html', { root: 'public' }));
-router.get('/lobby',   requireAuth, (req, res) => res.sendFile('lobby.html', { root: 'public' }));
+// /chess and /lobby are now handled by the Vue SPA (SPA fallback in server.js).
+// The auth guard in Vue Router handles client-side redirects to /login.
 
 router.get('/api/me', requireAuth, async (req, res) => {
   try {
