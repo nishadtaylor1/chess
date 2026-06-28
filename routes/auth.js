@@ -5,8 +5,7 @@ const router   = express.Router();
 
 const STARTING_ELO = { beginner: 600, casual: 900, intermediate: 1200, advanced: 1500, expert: 1800 };
 
-router.get('/register', (req, res) => res.sendFile('register.html', { root: 'public' }));
-router.get('/login',    (req, res) => res.sendFile('login.html',    { root: 'public' }));
+// These routes are now handled by the Vue SPA (served via SPA fallback in server.js)
 
 router.post('/register', async (req, res) => {
   const { username, email, password, skill_level } = req.body;

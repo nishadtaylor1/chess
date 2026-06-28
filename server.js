@@ -26,6 +26,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
+// Serve Vite production build if it exists
+const fs   = require('fs');
+const path = require('path');
+if (fs.existsSync(path.join(__dirname, 'dist'))) {
+  app.use(express.static(path.join(__dirname, 'dist')));
+}
+
 const sessionMiddleware = session({
   store: new PgSession({ pool: db, tableName: 'session' }),
   secret: process.env.SESSION_SECRET,
@@ -43,6 +50,77 @@ app.use('/', require('./routes/game'));
 app.get('/', (req, res) => {
   if (req.session.userId) return res.redirect('/chess');
   res.redirect('/login');
+});
+
+// ── JSON API auth endpoints for Vue SPA ───────────────────────────────────────
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password)
+    return res.status(400).json({ error: 'Username and password are required.' });
+  const bcrypt = require('bcryptjs');
+  try {
+    const result = await db.query(
+      'SELECT id, username, password_hash, elo FROM users WHERE username = $1',
+      [username.trim()]
+    );
+    const user = result.rows[0];
+    if (!user || !(await bcrypt.compare(password, user.password_hash)))
+      return res.status(401).json({ error: 'Invalid username or password.' });
+    req.session.userId   = user.id;
+    req.session.username = user.username;
+    res.json({ ok: true, username: user.username, elo: user.elo });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error. Please try again.' });
+  }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  const { username, email, password, skill_level } = req.body;
+  if (!username || !email || !password)
+    return res.status(400).json({ error: 'All fields are required.' });
+  if (password.length < 8)
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  const STARTING_ELO = { beginner: 600, casual: 900, intermediate: 1200, advanced: 1500, expert: 1800 };
+  const elo = STARTING_ELO[skill_level] ?? 1200;
+  const bcrypt = require('bcryptjs');
+  try {
+    const hash = await bcrypt.hash(password, 12);
+    const result = await db.query(
+      'INSERT INTO users (username, email, password_hash, elo) VALUES ($1, $2, $3, $4) RETURNING id, username, elo',
+      [username.trim(), email.trim().toLowerCase(), hash, elo]
+    );
+    req.session.userId   = result.rows[0].id;
+    req.session.username = result.rows[0].username;
+    res.json({ ok: true, username: result.rows[0].username, elo: result.rows[0].elo });
+  } catch (err) {
+    if (err.code === '23505') {
+      const field = err.detail.includes('username') ? 'Username' : 'Email';
+      return res.status(409).json({ error: `${field} is already taken.` });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Server error. Please try again.' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+// ── SPA fallback: serve dist/index.html for unmatched GET routes ──────────────
+// (only when dist exists; during dev, Vite handles this)
+app.get('*', (req, res, next) => {
+  // Skip API, socket.io, and legacy HTML routes
+  if (req.path.startsWith('/api/') ||
+      req.path.startsWith('/socket.io') ||
+      req.path === '/logout') {
+    return next();
+  }
+  const distIndex = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(distIndex)) {
+    return res.sendFile(distIndex);
+  }
+  next();
 });
 
 // ── In-memory game rooms ────────────────────────────────────────────────────
