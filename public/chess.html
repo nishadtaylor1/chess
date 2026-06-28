@@ -352,6 +352,15 @@
     .hist-item { cursor:pointer; transition:border-color .12s, background .12s; }
     .hist-item:hover { border-color:#6366f1; background:rgba(99,102,241,.1); }
 
+    /* ── Move quality inline in move list ─────────────────────── */
+    .mv-quality {
+      display:inline-block; font-size:9px; font-weight:900; line-height:1;
+      margin-left:2px; vertical-align:middle;
+    }
+    /* Pulse animation for newly computed quality */
+    @keyframes quality-in { from{opacity:0;transform:scale(0)} to{opacity:1;transform:scale(1)} }
+    .mv-quality { animation:quality-in .18s ease-out; }
+
     /* Move quality badge */
     .move-badge {
       position:absolute; top:3px; right:3px;
@@ -1245,6 +1254,14 @@ let evalTurn  = 'w';
 let reviewingHistory = false;
 let pendingMpWin     = false; // set in game:end so applyEloUpdate can trigger modal
 
+// review game analysis (background Stockfish batch)
+let reviewW              = null;   // dedicated worker for review analysis
+let reviewWorkerBest     = { type:'cp', value:0 };
+let reviewWorkerResolve  = null;
+let reviewGameTag        = 0;      // incremented to cancel stale analysis
+let reviewEvals          = [];     // { type, wVal } for each position (0 = start)
+let reviewQualities      = [];     // quality for each move, 1-indexed
+
 // move quality
 let prevEvalState       = { type:'cp', wVal:0 }; // last completed eval (White's perspective)
 let pendingQualityCheck = null; // { moverColor, prev, toSq } | null
@@ -1502,10 +1519,21 @@ function updateMoveList() {
     const mkSan = (idx) => {
       const span = document.createElement('span');
       span.className = 'mv-san';
-      span.textContent = h[idx]?.san || '';
       if (idx + 1 === viewIdx) span.classList.add('current');
       else if (idx + 1 < viewIdx) span.classList.add('viewed');
       span.onclick = () => goToMove(idx + 1);
+      span.textContent = h[idx]?.san || '';
+      if (reviewingHistory) {
+        const q = reviewQualities[idx + 1];
+        if (q) {
+          const qs = document.createElement('span');
+          qs.className = 'mv-quality';
+          qs.textContent = q.symbol;
+          qs.title = q.label;
+          qs.style.color = q.bg;
+          span.appendChild(qs);
+        }
+      }
       return span;
     };
 
@@ -1539,6 +1567,7 @@ function goToMove(idx) {
   renderBoard(); updateMoveList(); updateAutoOpening();
   const vg = getViewGame();
   scheduleEval(vg.fen(), vg.turn());
+  if (reviewingHistory) showReviewBadgeForMove(viewIdx);
 }
 function goToStart()   { goToMove(0); }
 function goBack()      { goToMove(viewIdx - 1); }
@@ -2133,6 +2162,8 @@ function newGame() {
   moveQualityBadge = null; pendingQualityCheck = null;
   prevEvalState = { type:'cp', wVal:0 };
   reviewingHistory = false;
+  reviewGameTag++;
+  reviewEvals = []; reviewQualities = [];
   document.getElementById('reviewBanner').style.display = 'none';
   unlockSettings();
   setThinking(false);
@@ -2330,16 +2361,99 @@ function stopConfetti() {
   canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
 }
 
+// ── Review game analysis ────────────────────────────────────────────────────
+function getReviewWorker() {
+  if (reviewW) return reviewW;
+  reviewW = new Worker('/js/stockfish.js');
+  reviewW.onmessage = e => {
+    const line = typeof e.data === 'string' ? e.data : String(e.data);
+    if (line.startsWith('info') && line.includes(' score ')) {
+      const m = line.match(/\bscore (cp|mate) (-?\d+)/);
+      if (m) reviewWorkerBest = { type: m[1], value: parseInt(m[2]) };
+    }
+    if (line.startsWith('bestmove') && reviewWorkerResolve) {
+      const cb = reviewWorkerResolve; reviewWorkerResolve = null;
+      cb({ ...reviewWorkerBest });
+    }
+  };
+  reviewW.postMessage('uci');
+  reviewW.postMessage('isready');
+  return reviewW;
+}
+
+function evalPositionForReview(fen, turn) {
+  const w = getReviewWorker();
+  reviewWorkerBest = { type:'cp', value:0 };
+  return new Promise(resolve => {
+    reviewWorkerResolve = score => {
+      const wVal = turn === 'w' ? score.value : -score.value;
+      resolve({ type: score.type, wVal });
+    };
+    w.postMessage('stop');
+    w.postMessage(`position fen ${fen}`);
+    w.postMessage('go depth 12');
+  });
+}
+
+async function analyzeReviewGame() {
+  const myTag = reviewGameTag;
+  const hist = game.history({ verbose: true });
+  reviewEvals    = new Array(hist.length + 1).fill(null);
+  reviewQualities = new Array(hist.length + 1).fill(null);
+
+  // Build positions array: position[0] = start, position[i] = after move i
+  const positions = [];
+  const tmp = new Chess();
+  positions.push({ fen: tmp.fen(), turn: tmp.turn() });
+  for (const mv of hist) {
+    tmp.move({ from: mv.from, to: mv.to, promotion: mv.promotion });
+    positions.push({ fen: tmp.fen(), turn: tmp.turn() });
+  }
+
+  for (let i = 0; i < positions.length; i++) {
+    if (myTag !== reviewGameTag) return;
+    const evalResult = await evalPositionForReview(positions[i].fen, positions[i].turn);
+    if (myTag !== reviewGameTag) return;
+    reviewEvals[i] = evalResult;
+
+    if (i > 0 && reviewEvals[i - 1] !== null) {
+      const moverColor = positions[i - 1].turn; // who moved to reach position[i]
+      const prevCp = evalToWhiteCp(reviewEvals[i - 1]);
+      const nextCp = evalToWhiteCp(evalResult);
+      const cpLoss = moverColor === 'w' ? (prevCp - nextCp) : (nextCp - prevCp);
+      reviewQualities[i] = classifyMoveQuality(cpLoss);
+      updateMoveList();
+      if (reviewingHistory && viewIdx === i) showReviewBadgeForMove(i);
+    }
+  }
+}
+
+function showReviewBadgeForMove(moveIdx) {
+  if (moveQualityTimer) { clearTimeout(moveQualityTimer); moveQualityTimer = null; }
+  document.querySelectorAll('.move-badge').forEach(el => el.remove());
+  moveQualityBadge = null;
+  if (!reviewingHistory || moveIdx <= 0) return;
+  const quality = reviewQualities[moveIdx];
+  if (!quality) return;
+  const move = getHistory()[moveIdx - 1];
+  if (!move?.to) return;
+  moveQualityBadge = { sq: move.to, quality };
+  const sqEl = document.querySelector(`#board [data-sq="${move.to}"]`);
+  if (sqEl) appendMoveBadge(sqEl, quality);
+  // No timer — badge stays until next navigation
+}
+
 // ── History review ──────────────────────────────────────────────────────────
 function replayGame(pgn) {
   if (game.history().length > 0 && !game.isGameOver() && !reviewingHistory) {
     if (!confirm('Leave your current game to review this one?')) return;
   }
   if (cpuRunning) stopCpuGame();
-  gameId++; setThinking(false); clockStop();
+  gameId++; reviewGameTag++; setThinking(false); clockStop();
   if (moveQualityTimer) { clearTimeout(moveQualityTimer); moveQualityTimer = null; }
   moveQualityBadge = null; pendingQualityCheck = null;
   annotations = []; hintArrow = null;
+  reviewEvals = []; reviewQualities = [];
   game = new Chess();
   try { game.loadPgn(pgn); } catch(_) { showToast('Could not load game.', 2000); return; }
   reviewingHistory = true;
@@ -2347,9 +2461,12 @@ function replayGame(pgn) {
   unlockSettings(); resetEvalBar();
   document.getElementById('reviewBanner').style.display = '';
   renderBoard(); updateStatus(); updateMoveList();
+  analyzeReviewGame();
 }
 
 function closeReview() {
+  reviewGameTag++;
+  reviewEvals = []; reviewQualities = [];
   reviewingHistory = false;
   document.getElementById('reviewBanner').style.display = 'none';
   newGame();
