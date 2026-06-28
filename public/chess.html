@@ -308,6 +308,20 @@
     }
     .hist-item .res { font-weight:700; color:#6366f1; }
     .hist-meta { color:#475569; font-size:10px; text-align:right; }
+
+    /* Move quality badge */
+    .move-badge {
+      position:absolute; top:3px; right:3px;
+      min-width:18px; height:18px; border-radius:10px; padding:0 3px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:10px; font-weight:900; line-height:1;
+      z-index:6; pointer-events:none;
+      box-shadow:0 1px 4px rgba(0,0,0,.55);
+      animation:badge-pop .18s ease-out;
+    }
+    @keyframes badge-pop {
+      0%{transform:scale(0)} 80%{transform:scale(1.18)} 100%{transform:scale(1)}
+    }
   </style>
 </head>
 <body>
@@ -1012,6 +1026,13 @@ function initEvalWorker() {
       // Stockfish reports from side-to-move perspective; convert to White's
       const wVal = evalTurn === 'w' ? evalBest.value : -evalBest.value;
       renderEvalBar(evalBest.type, wVal);
+      const newEvalState = { type: evalBest.type, wVal };
+      if (pendingQualityCheck) {
+        const pqc = pendingQualityCheck;
+        pendingQualityCheck = null;
+        showMoveQuality(pqc.toSq, pqc.moverColor, pqc.prev, newEvalState);
+      }
+      prevEvalState = newEvalState;
     }
   };
   evalW.onerror = e => console.error('Eval worker error:', e);
@@ -1064,6 +1085,52 @@ function resetEvalBar() {
   lbl.textContent = '='; lbl.className = 'eval-lbl even';
 }
 
+// ── Move quality classification ────────────────────────────────────────────
+function evalToWhiteCp(state) {
+  // Treat forced mates as ±10000 cp so arithmetic handles them uniformly
+  if (state.type === 'mate') return state.wVal > 0 ? 10000 : -10000;
+  return state.wVal;
+}
+
+function classifyMoveQuality(cpLoss) {
+  if (cpLoss <= 5)   return { label:'Best',       symbol:'★',  bg:'#1bada6', fg:'#fff' };
+  if (cpLoss <= 15)  return { label:'Excellent',  symbol:'!',  bg:'#96bc4b', fg:'#fff' };
+  if (cpLoss <= 30)  return { label:'Good',       symbol:'✓',  bg:'#a8c777', fg:'#fff' };
+  if (cpLoss <= 60)  return { label:'Inaccuracy', symbol:'?!', bg:'#f0c15d', fg:'#333' };
+  if (cpLoss <= 120) return { label:'Mistake',    symbol:'?',  bg:'#e06c27', fg:'#fff' };
+  return               { label:'Blunder',     symbol:'??', bg:'#cc3333', fg:'#fff' };
+}
+
+function appendMoveBadge(sqEl, quality) {
+  const badge = document.createElement('div');
+  badge.className = 'move-badge';
+  badge.textContent = quality.symbol;
+  badge.title = quality.label;
+  badge.style.cssText = `background:${quality.bg};color:${quality.fg};`;
+  sqEl.appendChild(badge);
+}
+
+function showMoveQuality(toSq, moverColor, prev, next) {
+  const prevCp = evalToWhiteCp(prev);
+  const nextCp = evalToWhiteCp(next);
+  // cpLoss: how many cp the mover lost relative to engine eval before the move
+  const cpLoss = moverColor === 'w' ? (prevCp - nextCp) : (nextCp - prevCp);
+  const quality = classifyMoveQuality(cpLoss);
+
+  if (moveQualityTimer) { clearTimeout(moveQualityTimer); moveQualityTimer = null; }
+  document.querySelectorAll('.move-badge').forEach(el => el.remove());
+  moveQualityBadge = { sq: toSq, quality };
+
+  const sqEl = document.querySelector(`#board [data-sq="${toSq}"]`);
+  if (sqEl) appendMoveBadge(sqEl, quality);
+
+  moveQualityTimer = setTimeout(() => {
+    moveQualityBadge = null;
+    moveQualityTimer = null;
+    document.querySelectorAll('.move-badge').forEach(el => el.remove());
+  }, 3500);
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 let game        = new Chess();
 let selected    = null;
@@ -1111,6 +1178,12 @@ let evalReady = false;
 let evalQueue = null;   // { fen, turn } buffered while worker initialises
 let evalBest  = { type:'cp', value:0 };
 let evalTurn  = 'w';
+
+// move quality
+let prevEvalState       = { type:'cp', wVal:0 }; // last completed eval (White's perspective)
+let pendingQualityCheck = null; // { moverColor, prev, toSq } | null
+let moveQualityBadge    = null; // { sq, quality } | null — currently displayed badge
+let moveQualityTimer    = null;
 
 // clock
 let whiteMs = 0, blackMs = 0;
@@ -1296,6 +1369,9 @@ function renderBoard() {
         img.src = `/img/pieces/${piece.color}${piece.type.toUpperCase()}.svg`;
         img.alt = ''; img.draggable = false;
         cell.appendChild(img);
+      }
+      if (moveQualityBadge && sq === moveQualityBadge.sq) {
+        appendMoveBadge(cell, moveQualityBadge.quality);
       }
       cell.addEventListener('mousedown', e => onSqDown(sq, e));
       boardEl.appendChild(cell);
@@ -1548,10 +1624,10 @@ function handleMove(from, to, promotion = 'q') {
     game = new Chess();
     h.forEach(m => game.move(m));
   }
-  doMove(from, to, promotion);
+  doMove(from, to, promotion, true);
 }
 
-function doMove(from, to, promotion = 'q') {
+function doMove(from, to, promotion = 'q', human = false) {
   const p      = game.get(from);
   const isPromo = p?.type === 'p' && (to[1] === '8' || to[1] === '1');
   const move   = game.move({ from, to, promotion: isPromo ? promotion : undefined });
@@ -1564,6 +1640,13 @@ function doMove(from, to, promotion = 'q') {
   if (game.history().length === 1 && currentMode === 'vs-computer') lockSettings();
   renderBoard(); updateStatus(); updateMoveList(); updateOpeningStatus();
   try { updateAutoOpening(); } catch(e) { console.error('updateAutoOpening:', e); }
+
+  // Set up move quality check for human moves (or all moves in analysis)
+  if (human || playMode === 'analysis') {
+    const moverColor = game.turn() === 'w' ? 'b' : 'w';
+    pendingQualityCheck = { moverColor, prev: { ...prevEvalState }, toSq: move.to };
+  }
+
   scheduleEval(game.fen(), game.turn());
 
   if (currentMode === 'multiplayer') {
@@ -1976,6 +2059,9 @@ function newGame() {
   if (dragState) { dragState.ghost.remove(); dragState = null; }
   annotations = []; annotatingFrom = null; previewAnnotation = null;
   hintArrow = null; hintLoading = false;
+  if (moveQualityTimer) { clearTimeout(moveQualityTimer); moveQualityTimer = null; }
+  moveQualityBadge = null; pendingQualityCheck = null;
+  prevEvalState = { type:'cp', wVal:0 };
   unlockSettings();
   setThinking(false);
   clockInit();
@@ -2160,7 +2246,7 @@ function initMultiplayer(roomId) {
   });
 
   mpSocket.on('game:move', ({ from, to, promotion }) => {
-    doMove(from, to, promotion || 'q');
+    doMove(from, to, promotion || 'q', true);
     scheduleEval(game.fen(), game.turn());
   });
 
