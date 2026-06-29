@@ -38,40 +38,31 @@ const blackBarName = computed(() => {
 const showViewBanner = computed(() => !gameStore.atLivePos && !reviewStore.reviewingHistory)
 
 // ── Captured pieces + material advantage ──
+// Derived from verbose move history up to viewIdx — works correctly in review mode.
 const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 }
-const STARTING    = { p: 8, n: 2, b: 2, r: 2, q: 1 }
 const PIECE_ORDER = ['p', 'n', 'b', 'r', 'q']
 
 const material = computed(() => {
-  void gameStore.gameVersion
-  const vg = gameStore.viewGame
-  const onBoard = { w: { p:0,n:0,b:0,r:0,q:0 }, b: { p:0,n:0,b:0,r:0,q:0 } }
-  for (const row of vg.board()) {
-    for (const sq of row) {
-      if (sq && sq.type !== 'k') onBoard[sq.color][sq.type]++
-    }
+  const hist     = gameStore.history   // reactive: recomputes on every move
+  const viewIdx  = gameStore.viewIdx
+  const whiteCap = { p:0, n:0, b:0, r:0, q:0 }
+  const blackCap = { p:0, n:0, b:0, r:0, q:0 }
+  for (let i = 0; i < viewIdx; i++) {
+    const mv = hist[i]
+    if (!mv?.captured) continue
+    if (mv.color === 'w') whiteCap[mv.captured] = (whiteCap[mv.captured] || 0) + 1
+    else                  blackCap[mv.captured] = (blackCap[mv.captured] || 0) + 1
   }
-  // captured[color] = pieces of that color that have been taken
-  const cap = {}
-  for (const c of ['w', 'b']) {
-    cap[c] = {}
-    for (const t of PIECE_ORDER) cap[c][t] = STARTING[t] - onBoard[c][t]
-  }
-  // White's captures = black pieces taken; Black's captures = white pieces taken
   let wPts = 0, bPts = 0
   for (const t of PIECE_ORDER) {
-    wPts += cap['b'][t] * PIECE_VALUE[t]
-    bPts += cap['w'][t] * PIECE_VALUE[t]
+    wPts += whiteCap[t] * PIECE_VALUE[t]
+    bPts += blackCap[t] * PIECE_VALUE[t]
   }
-  return {
-    whiteCap: cap['b'],  // black pieces captured by white
-    blackCap: cap['w'],  // white pieces captured by black
-    wAdv: wPts - bPts,
-    bAdv: bPts - wPts,
-  }
+  return { whiteCap, blackCap, wAdv: wPts - bPts, bAdv: bPts - wPts }
 })
 
 function captureList(capObj, pieceColor) {
+  if (!capObj) return []
   const list = []
   for (const t of PIECE_ORDER) {
     for (let i = 0; i < (capObj[t] || 0); i++) {
