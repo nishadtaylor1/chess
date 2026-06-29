@@ -24,7 +24,15 @@ nav button:hover { border-color: #6366f1; color: #6366f1; }
 }
 
 /* board column */
-.board-col { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
+.board-col { flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; }
+
+/* captured pieces row */
+.captures-bar {
+  display: flex; align-items: center; gap: 1px;
+  min-height: 20px; padding: 1px 4px;
+}
+.captured-piece { width: 18px; height: 18px; opacity: 0.82; pointer-events: none; }
+.material-adv { font-size: 11px; font-weight: 700; color: #94a3b8; margin-left: 4px; }
 
 .player-bar {
   display: flex; align-items: center; justify-content: space-between;

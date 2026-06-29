@@ -37,6 +37,50 @@ const blackBarName = computed(() => {
 
 const showViewBanner = computed(() => !gameStore.atLivePos && !reviewStore.reviewingHistory)
 
+// ── Captured pieces + material advantage ──
+const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 }
+const STARTING    = { p: 8, n: 2, b: 2, r: 2, q: 1 }
+const PIECE_ORDER = ['p', 'n', 'b', 'r', 'q']
+
+const material = computed(() => {
+  void gameStore.gameVersion
+  const vg = gameStore.viewGame
+  const onBoard = { w: { p:0,n:0,b:0,r:0,q:0 }, b: { p:0,n:0,b:0,r:0,q:0 } }
+  for (const row of vg.board()) {
+    for (const sq of row) {
+      if (sq && sq.type !== 'k') onBoard[sq.color][sq.type]++
+    }
+  }
+  // captured[color] = pieces of that color that have been taken
+  const cap = {}
+  for (const c of ['w', 'b']) {
+    cap[c] = {}
+    for (const t of PIECE_ORDER) cap[c][t] = STARTING[t] - onBoard[c][t]
+  }
+  // White's captures = black pieces taken; Black's captures = white pieces taken
+  let wPts = 0, bPts = 0
+  for (const t of PIECE_ORDER) {
+    wPts += cap['b'][t] * PIECE_VALUE[t]
+    bPts += cap['w'][t] * PIECE_VALUE[t]
+  }
+  return {
+    whiteCap: cap['b'],  // black pieces captured by white
+    blackCap: cap['w'],  // white pieces captured by black
+    wAdv: wPts - bPts,
+    bAdv: bPts - wPts,
+  }
+})
+
+function captureList(capObj, pieceColor) {
+  const list = []
+  for (const t of PIECE_ORDER) {
+    for (let i = 0; i < (capObj[t] || 0); i++) {
+      list.push(`/img/pieces/${pieceColor}${t.toUpperCase()}.svg`)
+    }
+  }
+  return list
+}
+
 // ── MP overlay (waiting for opponent) ──
 const mpOverlayVisible = computed(() =>
   uiStore.currentMode === 'multiplayer' && mp.mpWaiting.value
@@ -135,6 +179,14 @@ function mpEmitMove({ from, to, promotion }) {
           :class="{ 'low-time': uiStore.blackLowTime }"
         >{{ uiStore.blackClockDisplay }}</span>
       </div>
+      <!-- Black's captures (white pieces Black has taken) -->
+      <div class="captures-bar">
+        <img
+          v-for="(src, i) in captureList(material.blackCap, 'w')"
+          :key="i" :src="src" class="captured-piece" alt=""
+        />
+        <span v-if="material.bAdv > 0" class="material-adv">+{{ material.bAdv }}</span>
+      </div>
 
       <!-- Board -->
       <ChessBoard
@@ -142,6 +194,15 @@ function mpEmitMove({ from, to, promotion }) {
         :mp-room-id="mp.mpRoomId.value"
         :mp-emit-move="mpEmitMove"
       />
+
+      <!-- White's captures (black pieces White has taken) -->
+      <div class="captures-bar">
+        <img
+          v-for="(src, i) in captureList(material.whiteCap, 'b')"
+          :key="i" :src="src" class="captured-piece" alt=""
+        />
+        <span v-if="material.wAdv > 0" class="material-adv">+{{ material.wAdv }}</span>
+      </div>
 
       <!-- White player bar (bottom) -->
       <div
